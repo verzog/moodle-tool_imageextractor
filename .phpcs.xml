@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="ProjectRuleset">
+    <!-- Proprietary, in-house plugin: the @license docblock tag uses a
+         proprietary value, so teach the license sniff to accept it instead of
+         demanding the GNU GPL string. See CLAUDE.md sections 9 / 10. -->
+    <config name="moodleLicenseRegex" value="@Proprietary.*all rights reserved@"/>
+    <rule ref="moodle">
+        <!-- Proprietary, in-house plugin: not GPL, so the Moodle GPL
+             boilerplate sniff does not apply. See CLAUDE.md sections 2.1 / 10. -->
+        <exclude name="moodle.Files.BoilerplateComment"/>
+    </rule>
+</ruleset>
