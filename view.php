@@ -186,7 +186,7 @@ if ($volumes) {
             $context->id,
             manager::COMPONENT,
             'volumes',
-            $volume->sequence,
+            $id,
             '/',
             $volume->filename,
             true
@@ -201,17 +201,23 @@ if ($volumes) {
 // Action buttons - hidden while the job is running so it cannot be double-fired.
 echo html_writer::start_div('mt-3');
 if (!$running) {
-    echo $OUTPUT->single_button(
-        new moodle_url($viewurl, ['action' => 'run', 'sesskey' => sesskey()]),
-        get_string('runjob', 'tool_imageextractor'),
-        'get'
-    );
+    // A replace job with restorable backups must be restored or cleared before
+    // it can run again, so we hide Run until then (rerunning would otherwise
+    // discard the backups of the original files).
+    $restorable = $isreplace && manager::has_restorable($id);
+    if (!$restorable) {
+        echo $OUTPUT->single_button(
+            new moodle_url($viewurl, ['action' => 'run', 'sesskey' => sesskey()]),
+            get_string('runjob', 'tool_imageextractor'),
+            'get'
+        );
+    }
     echo $OUTPUT->single_button(
         new moodle_url('/admin/tool/imageextractor/edit.php', ['id' => $id]),
         get_string('edit'),
         'get'
     );
-    if ($isreplace && $job->status === manager::STATUS_COMPLETED && manager::has_restorable($id)) {
+    if ($restorable) {
         echo $OUTPUT->single_button(
             new moodle_url($viewurl, ['action' => 'restore', 'sesskey' => sesskey()]),
             get_string('restorejob', 'tool_imageextractor'),

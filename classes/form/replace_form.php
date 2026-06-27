@@ -144,9 +144,15 @@ class replace_form extends \moodleform {
         $errors += criteria_fields::validate($data);
 
         // A replacement source is required, unless editing an existing job that
-        // already has one stored.
-        $hasstored = !empty($data['id']);
-        if (($data['replacemode'] ?? 'single') === 'zip') {
+        // already has a stored source FOR THE SELECTED MODE. Switching, say,
+        // single -> zip without uploading a new archive must not pass, or the
+        // job would run against the stale single image (or nothing).
+        $mode = $data['replacemode'] ?? 'single';
+        $storedmode = $this->_customdata['storedreplacemode'] ?? '';
+        $hasstoredsource = !empty($this->_customdata['hasstoredsource']);
+        $hasstored = !empty($data['id']) && $hasstoredsource && $mode === $storedmode;
+
+        if ($mode === 'zip') {
             if (!$this->get_new_filename('replacementzip') && !$hasstored) {
                 $errors['replacementzip'] = get_string('errornoreplacement', 'tool_imageextractor');
             }

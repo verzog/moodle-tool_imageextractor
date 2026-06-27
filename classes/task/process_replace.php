@@ -66,8 +66,10 @@ class process_replace extends \core\task\adhoc_task {
         }
 
         if (!manager::is_enabled() || !manager::is_replace_allowed()) {
-            mtrace('tool_imageextractor: replace disabled, leaving job ' . $jobid . ' queued');
-            return;
+            // Throw rather than return so Moodle reschedules this adhoc task and
+            // the job resumes once replace is re-enabled, instead of the task
+            // being consumed and the job left stuck as queued forever.
+            throw new \moodle_exception('disabledretry', 'tool_imageextractor');
         }
 
         if (!in_array($job->status, [manager::STATUS_QUEUED, manager::STATUS_PROCESSING], true)) {

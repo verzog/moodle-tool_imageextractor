@@ -198,7 +198,23 @@ class manager {
 
         if (!empty($data->id)) {
             $record->id = (int) $data->id;
+            $existing = self::get_job($record->id);
+            $running = in_array($existing->status, [self::STATUS_QUEUED, self::STATUS_PROCESSING], true);
             $DB->update_record('tool_imageextractor_job', $record);
+
+            // Editing the definition invalidates any previous run's results, so
+            // clear them and return the job to draft - otherwise the view page
+            // would keep offering stale downloads from the old definition. We
+            // skip this while a run is in flight, and for replace jobs that
+            // still hold restorable backups (those must be restored or cleared
+            // explicitly so originals are never silently discarded).
+            if (!$running && !self::has_restorable($record->id)) {
+                self::clear_results($record->id);
+                $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_DRAFT, ['id' => $record->id]);
+                $DB->set_field('tool_imageextractor_job', 'error', null, ['id' => $record->id]);
+                $DB->set_field('tool_imageextractor_job', 'timestarted', 0, ['id' => $record->id]);
+                $DB->set_field('tool_imageextractor_job', 'timecompleted', 0, ['id' => $record->id]);
+            }
         } else {
             $record->status = self::STATUS_DRAFT;
             $record->timecreated = $now;
@@ -308,6 +324,12 @@ class manager {
         global $DB;
 
         $job = self::get_job($jobid);
+        // Re-running a replace job clears results, which would discard the
+        // backups of the previous run's originals. Refuse until they have been
+        // restored or explicitly cleared, so originals can never be stranded.
+        if ($job->jobtype === 'replace' && self::has_restorable($jobid)) {
+            throw new \moodle_exception('cannotrerunwithbackups', 'tool_imageextractor');
+        }
         // Reset run state so a re-run starts cleanly.
         self::clear_results($jobid);
         $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_QUEUED, ['id' => $jobid]);
@@ -354,6 +376,11 @@ class manager {
      */
     public static function has_restorable(int $jobid): bool {
         global $DB;
+        // Only meaningful when the job actually kept backups; a replaced item
+        // with no backup file cannot be restored.
+        if (!$DB->record_exists('tool_imageextractor_job', ['id' => $jobid, 'backup' => 1])) {
+            return false;
+        }
         return $DB->record_exists(
             'tool_imageextractor_item',
             ['jobid' => $jobid, 'status' => 'done']
@@ -379,10 +406,8 @@ class manager {
         }
 
         $DB->delete_records('tool_imageextractor_item', ['jobid' => $jobid]);
-        $volumes = $DB->get_records('tool_imageextractor_volume', ['jobid' => $jobid]);
-        foreach ($volumes as $volume) {
-            $fs->delete_area_files($context->id, self::COMPONENT, 'volumes', $volume->sequence);
-        }
+        // Volumes are stored under the job id as their file-area item id.
+        $fs->delete_area_files($context->id, self::COMPONENT, 'volumes', $jobid);
         $DB->delete_records('tool_imageextractor_volume', ['jobid' => $jobid]);
         $fs->delete_area_files($context->id, self::COMPONENT, 'manifest', $jobid);
 

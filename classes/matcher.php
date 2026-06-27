@@ -199,24 +199,28 @@ class matcher {
             }
         }
 
-        // Exact filename match list (CSV match mode).
+        // Exact filename and/or content-hash match lists (CSV match mode). A
+        // match list pulls files whose filename OR content hash is listed, so
+        // the two predicates are combined with OR, not AND.
+        $matchors = [];
         if (!empty($c['filenames']) && is_array($c['filenames'])) {
             $names = array_values(array_unique(array_filter(array_map('strval', $c['filenames']), 'strlen')));
             if ($names) {
                 [$insql, $inparams] = $DB->get_in_or_equal($names, SQL_PARAMS_NAMED, $prefix . 'name');
-                $clauses[] = 'f.filename ' . $insql;
+                $matchors[] = 'f.filename ' . $insql;
                 $params += $inparams;
             }
         }
-
-        // Exact content-hash match list (CSV match mode).
         if (!empty($c['contenthashes']) && is_array($c['contenthashes'])) {
             $hashes = array_values(array_unique(array_filter(array_map('strval', $c['contenthashes']), 'strlen')));
             if ($hashes) {
                 [$insql, $inparams] = $DB->get_in_or_equal($hashes, SQL_PARAMS_NAMED, $prefix . 'hash');
-                $clauses[] = 'f.contenthash ' . $insql;
+                $matchors[] = 'f.contenthash ' . $insql;
                 $params += $inparams;
             }
+        }
+        if ($matchors) {
+            $clauses[] = '(' . implode(' OR ', $matchors) . ')';
         }
 
         // Course scope (CSV scope mode, course identifiers). A file belongs

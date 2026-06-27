@@ -54,7 +54,27 @@ $PAGE->set_url($editurl);
 $PAGE->set_title(get_string('editjob', 'tool_imageextractor'));
 $PAGE->set_heading(get_string('editjob', 'tool_imageextractor'));
 
-$mform = $isreplace ? new replace_form($editurl->out(false)) : new job_form($editurl->out(false));
+if ($isreplace) {
+    // Tell the form which replacement mode (if any) already has a stored source,
+    // so it can require a fresh upload when the mode is changed on edit.
+    $storedsource = false;
+    if ($job) {
+        $storedsource = (bool) get_file_storage()->get_area_files(
+            $context->id,
+            manager::COMPONENT,
+            'replacement',
+            $job->id,
+            'id',
+            false
+        );
+    }
+    $mform = new replace_form($editurl->out(false), [
+        'storedreplacemode' => $job ? $job->replacemode : '',
+        'hasstoredsource'   => $storedsource,
+    ]);
+} else {
+    $mform = new job_form($editurl->out(false));
+}
 
 if ($mform->is_cancelled()) {
     redirect($job ? new moodle_url('/admin/tool/imageextractor/view.php', ['id' => $id]) : $indexurl);

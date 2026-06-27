@@ -68,8 +68,10 @@ class process_job extends \core\task\adhoc_task {
         }
 
         if (!manager::is_enabled()) {
-            mtrace('tool_imageextractor: plugin disabled, leaving job ' . $jobid . ' queued');
-            return;
+            // Throw rather than return so Moodle reschedules this adhoc task and
+            // the job resumes once the plugin is re-enabled, instead of the task
+            // being consumed and the job left stuck as queued forever.
+            throw new \moodle_exception('disabledretry', 'tool_imageextractor');
         }
 
         if (!in_array($job->status, [manager::STATUS_QUEUED, manager::STATUS_PROCESSING], true)) {
@@ -213,7 +215,10 @@ class process_job extends \core\task\adhoc_task {
         );
         foreach ($rs as $item) {
             $stored = $fs->get_file_by_id((int) $item->fileid);
-            if (!$stored || $stored->is_directory()) {
+            // Skip files that have vanished or whose content is missing on disk -
+            // the ZIP packer would otherwise silently drop them and the manifest
+            // would wrongly report a successful export.
+            if (!$stored || $stored->is_directory() || \tool_imageextractor\replacer::content_missing($stored)) {
                 $failedids[] = (int) $item->id;
                 continue;
             }
@@ -240,16 +245,31 @@ class process_job extends \core\task\adhoc_task {
             $packer = get_file_packer('application/zip');
             $packer->archive_to_pathname($archivefiles, $temppath);
 
+            // Volumes are stored under the job id (not the sequence) so two
+            // jobs writing volume 1 cannot overwrite each other's archive.
             $filename = 'images-volume-' . sprintf('%03d', $sequence) . '.zip';
             $filerecord = [
                 'contextid' => $context->id,
                 'component' => manager::COMPONENT,
                 'filearea'  => 'volumes',
-                'itemid'    => $sequence,
+                'itemid'    => (int) $job->id,
                 'filepath'  => '/',
                 'filename'  => $filename,
             ];
-            $fs->delete_area_files($context->id, manager::COMPONENT, 'volumes', $sequence);
+            // Replace just this volume's file if a stale copy exists; leave the
+            // job's earlier volumes untouched.
+            if (
+                $existingzip = $fs->get_file(
+                    $context->id,
+                    manager::COMPONENT,
+                    'volumes',
+                    (int) $job->id,
+                    '/',
+                    $filename
+                )
+            ) {
+                $existingzip->delete();
+            }
             $storedzip = $fs->create_file_from_pathname($filerecord, $temppath);
 
             $volume = new \stdClass();

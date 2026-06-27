@@ -57,6 +57,18 @@ class provider implements
             ],
             'privacy:metadata:job'
         );
+        // Each matched file records the id of the user who uploaded it, so a
+        // user can be referenced by a job they did not create.
+        $collection->add_database_table(
+            'tool_imageextractor_item',
+            [
+                'uploaderid'      => 'privacy:metadata:item:uploaderid',
+                'filename'        => 'privacy:metadata:item:filename',
+                'contenthash'     => 'privacy:metadata:item:contenthash',
+                'filetimecreated' => 'privacy:metadata:item:filetimecreated',
+            ],
+            'privacy:metadata:item'
+        );
         return $collection;
     }
 
@@ -69,7 +81,9 @@ class provider implements
     public static function get_contexts_for_userid(int $userid): contextlist {
         global $DB;
         $contextlist = new contextlist();
-        if ($DB->record_exists('tool_imageextractor_job', ['usermodified' => $userid])) {
+        $hasdata = $DB->record_exists('tool_imageextractor_job', ['usermodified' => $userid])
+            || $DB->record_exists('tool_imageextractor_item', ['uploaderid' => $userid]);
+        if ($hasdata) {
             $contextlist->add_system_context();
         }
         return $contextlist;
@@ -87,6 +101,11 @@ class provider implements
         $userlist->add_from_sql(
             'userid',
             'SELECT usermodified AS userid FROM {tool_imageextractor_job} WHERE usermodified <> 0',
+            []
+        );
+        $userlist->add_from_sql(
+            'userid',
+            'SELECT uploaderid AS userid FROM {tool_imageextractor_item} WHERE uploaderid <> 0',
             []
         );
     }
@@ -111,20 +130,43 @@ class provider implements
                 ['usermodified' => $user->id],
                 'timemodified DESC'
             );
-            if (!$jobs) {
-                continue;
+            if ($jobs) {
+                $export = array_map(static function ($job) {
+                    return (object) [
+                        'name'         => format_string($job->name),
+                        'status'       => $job->status,
+                        'timemodified' => transform::datetime($job->timemodified),
+                    ];
+                }, $jobs);
+                writer::with_context($context)->export_data(
+                    [get_string('pluginname', 'tool_imageextractor')],
+                    (object) ['jobs' => array_values($export)]
+                );
             }
-            $export = array_map(static function ($job) {
-                return (object) [
-                    'name'         => format_string($job->name),
-                    'status'       => $job->status,
-                    'timemodified' => transform::datetime($job->timemodified),
-                ];
-            }, $jobs);
-            writer::with_context($context)->export_data(
-                [get_string('pluginname', 'tool_imageextractor')],
-                (object) ['jobs' => array_values($export)]
+
+            // Files of this user that were captured by any job (theirs or not).
+            $items = $DB->get_records(
+                'tool_imageextractor_item',
+                ['uploaderid' => $user->id],
+                'id ASC'
             );
+            if ($items) {
+                $itemexport = array_map(static function ($item) {
+                    return (object) [
+                        'filename'        => $item->filename,
+                        'contenthash'     => $item->contenthash,
+                        'filetimecreated' => $item->filetimecreated
+                            ? transform::datetime($item->filetimecreated) : null,
+                    ];
+                }, $items);
+                writer::with_context($context)->export_data(
+                    [
+                        get_string('pluginname', 'tool_imageextractor'),
+                        get_string('privacy:path:items', 'tool_imageextractor'),
+                    ],
+                    (object) ['items' => array_values($itemexport)]
+                );
+            }
         }
     }
 
@@ -142,6 +184,7 @@ class provider implements
             return;
         }
         $DB->set_field('tool_imageextractor_job', 'usermodified', 0, []);
+        $DB->set_field('tool_imageextractor_item', 'uploaderid', 0, []);
     }
 
     /**
@@ -157,6 +200,7 @@ class provider implements
                 continue;
             }
             $DB->set_field('tool_imageextractor_job', 'usermodified', 0, ['usermodified' => $user->id]);
+            $DB->set_field('tool_imageextractor_item', 'uploaderid', 0, ['uploaderid' => $user->id]);
         }
     }
 
@@ -177,6 +221,10 @@ class provider implements
         [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'tie');
         $DB->execute(
             "UPDATE {tool_imageextractor_job} SET usermodified = 0 WHERE usermodified $insql",
+            $params
+        );
+        $DB->execute(
+            "UPDATE {tool_imageextractor_item} SET uploaderid = 0 WHERE uploaderid $insql",
             $params
         );
     }
