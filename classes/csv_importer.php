@@ -53,11 +53,13 @@ class csv_importer {
 
         $header = array_map(static function ($h) {
             return preg_replace('/[\s_]+/', '', \core_text::strtolower(trim($h)));
-        }, str_getcsv(array_shift($lines)));
+        }, str_getcsv(array_shift($lines), ',', '"', '\\'));
 
         $rows = [];
         foreach ($lines as $line) {
-            $cells = str_getcsv($line);
+            // PHP 8.4 deprecates calling str_getcsv() without the escape
+            // argument, so pass the historical default explicitly.
+            $cells = str_getcsv($line, ',', '"', '\\');
             $row = [];
             foreach ($header as $i => $key) {
                 if ($key === '') {
