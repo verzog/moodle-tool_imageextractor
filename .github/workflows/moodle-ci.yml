@@ -1,6 +1,16 @@
 name: Moodle CI
 
-on: [push, pull_request]
+# Run on pull requests, and on pushes to main and tags only. A plain
+# "[push, pull_request]" runs the whole matrix twice for every push to a PR
+# branch (once per event); scoping push to main/tags avoids that duplication
+# while still covering post-merge and release builds.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '*'
+  pull_request:
 
 jobs:
   test:
