@@ -18,16 +18,18 @@
  * @copyright  © Skin Cancer College Australasia
  * @license    Proprietary — Skin Cancer College Australasia, all rights reserved
  */
-
 $string['actions'] = 'Actions';
 $string['backtojobs'] = 'Back to jobs';
 $string['backup'] = 'Back up originals';
 $string['backup_help'] = 'Keep a copy of each original file before replacing it, so the replacement can be undone with Restore.';
 $string['cannotrerunwithbackups'] = 'This replace job still has restorable backups. Restore or clear them before running it again.';
 $string['clearresults'] = 'Clear results';
+$string['colfilename'] = 'File name';
+$string['colsize'] = 'Size';
 $string['component'] = 'Component';
 $string['confirmdelete'] = 'Delete the job "{$a}" and all of its generated archives? This cannot be undone.';
 $string['confirmreplace'] = 'This will replace the content of up to {$a->count} files ({$a->size}) across the live site. Originals are backed up where possible so the change can be restored. Continue?';
+$string['confirmreplacefinal'] = 'Replace {$a} files across the live site now? Originals are backed up where possible and can be reverted with Restore, but this otherwise cannot be undone.';
 $string['confirmrestore'] = 'Restore every replaced file in this job from its backup? This undoes the replacement.';
 $string['confirmrun'] = 'This job matches {$a->count} files ({$a->size}). Queue it for extraction now?';
 $string['criteria'] = 'Search criteria';
@@ -103,6 +105,7 @@ $string['privacy:metadata:job:timemodified'] = 'When the job was last modified.'
 $string['privacy:metadata:job:usermodified'] = 'The administrator who created or last edited the job.';
 $string['privacy:path:items'] = 'Captured files';
 $string['progress'] = 'Progress';
+$string['replaceadminonly'] = 'Only a site administrator can run a replace or restore job, because it overwrites live files across the whole site.';
 $string['replaced'] = 'Replaced';
 $string['replacedisabled'] = 'Replace/restore jobs are disabled. A site administrator must enable them in the plugin settings.';
 $string['replacement'] = 'Replacement';
@@ -112,9 +115,15 @@ $string['replacemode'] = 'Replacement source';
 $string['replacemode_help'] = 'Single uses one uploaded image for every matched file (for example, a new brand logo). ZIP uses an uploaded archive of images, matching each target to the archive entry with the same filename (for example, watermarked versions of existing images).';
 $string['replacemode_single'] = 'Single image for all matches';
 $string['replacemode_zip'] = 'ZIP of replacements matched by filename';
+$string['replacenomatchcell'] = 'no matching replacement';
+$string['replacepreviewheading'] = 'Files that would be replaced';
+$string['replacepreviewsummary'] = 'Matched by criteria: {$a->total}. Of the first {$a->scanned} checked, {$a->willreplace} would be replaced and {$a->willskip} skipped (no matching replacement).';
+$string['replacepreviewtruncated'] = 'Preview limited to the first {$a} matched files; the actual run processes every match.';
+$string['replacewarning'] = 'Warning: this permanently overwrites the content of matching files across the entire site - all courses and users, not just one. Originals are backed up only when "Back up originals" is enabled. Review the list below before continuing.';
 $string['restored'] = 'Restored';
 $string['restorejob'] = 'Restore (undo)';
 $string['restorequeued'] = 'Restore queued. Originals will be put back in the background via cron.';
+$string['restorewarning'] = 'Restoring overwrites the current (replaced) files with the backed-up originals across the site. Continue only if you want to undo this job\'s replacements.';
 $string['resultscleared'] = 'Results cleared.';
 $string['runjob'] = 'Run job';
 $string['runninghint'] = 'This job is running in the background. Reload this page to see updated progress.';

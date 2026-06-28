@@ -79,6 +79,68 @@ class replacer {
     }
 
     /**
+     * Read-only preview of what a replace run would do, for the confirmation
+     * screen. Scans matched targets without changing anything: counts how many
+     * would be replaced vs skipped (no matching replacement), and returns a
+     * sample of rows. The scan is capped so a huge directory cannot stall the
+     * confirm page.
+     *
+     * @param int $samplelimit Maximum sample rows to return.
+     * @param int $scancap Maximum matched files to scan for the breakdown.
+     * @return array ['total','scanned','willreplace','willskip','truncated','rows']
+     */
+    public function preview(int $samplelimit = 50, int $scancap = 2000): array {
+        $matcher = new matcher(manager::decode_criteria($this->job), false);
+        $estimate = $matcher->estimate();
+        $rs = $matcher->get_recordset();
+
+        $scanned = 0;
+        $willreplace = 0;
+        $willskip = 0;
+        $truncated = false;
+        $rows = [];
+        foreach ($rs as $file) {
+            if ($scanned >= $scancap) {
+                $truncated = true;
+                break;
+            }
+            $stored = $this->fs->get_file_by_id((int) $file->id);
+            if (!$stored || $stored->is_directory()) {
+                continue;
+            }
+            if ($this->job->missingonly && !self::content_missing($stored)) {
+                continue;
+            }
+            $scanned++;
+            $replacement = $this->resolve_replacement($file->filename);
+            if ($replacement) {
+                $willreplace++;
+            } else {
+                $willskip++;
+            }
+            if (count($rows) < $samplelimit) {
+                $rows[] = (object) [
+                    'filename'    => $file->filename,
+                    'component'   => $file->component,
+                    'filearea'    => $file->filearea,
+                    'filesize'    => (int) $file->filesize,
+                    'replacement' => $replacement ? $replacement->get_filename() : null,
+                ];
+            }
+        }
+        $rs->close();
+
+        return [
+            'total'       => (int) $estimate['count'],
+            'scanned'     => $scanned,
+            'willreplace' => $willreplace,
+            'willskip'    => $willskip,
+            'truncated'   => $truncated,
+            'rows'        => $rows,
+        ];
+    }
+
+    /**
      * Match target files and create one item row per target.
      *
      * @return void
