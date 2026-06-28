@@ -1,0 +1,391 @@
+<?php
+// Copyright (c) Skin Cancer College Australasia.
+// All rights reserved.
+//
+// This file is part of a proprietary plugin developed by Skin Cancer
+// College Australasia for use with Moodle. It is NOT free software and is
+// NOT released under the GNU General Public License.
+//
+// Unauthorised copying, distribution, modification, or use of this file,
+// in whole or in part, via any medium, is strictly prohibited without the
+// prior written permission of Skin Cancer College Australasia. The software
+// is provided "as is", without warranty of any kind, express or implied.
+
+/**
+ * Engine for replace/restore jobs.
+ *
+ * @package    tool_imageextractor
+ * @copyright  © Skin Cancer College Australasia
+ * @license    Proprietary — Skin Cancer College Australasia, all rights reserved
+ */
+
+namespace tool_imageextractor;
+
+/**
+ * Selects target files and swaps their content for a replacement, keeping a
+ * backup of each original so the change can be restored.
+ *
+ * A file's content is swapped by deleting the existing file record and
+ * recreating it at the same logical location (same context, component, area,
+ * item id, path and name). That preserves every embedded reference and
+ * pluginfile URL - only the internal file id changes.
+ */
+class replacer {
+    /** @var \stdClass The replace job. */
+    protected $job;
+
+    /** @var \file_storage */
+    protected $fs;
+
+    /** @var \context_system */
+    protected $context;
+
+    /** @var \stored_file|null Cached single-mode replacement file. */
+    protected $singlereplacement = false;
+
+    /** @var array|null Cached zip-mode map of basename => stored_file. */
+    protected $zipmap = null;
+
+    /**
+     * Constructor.
+     *
+     * @param \stdClass $job
+     */
+    public function __construct(\stdClass $job) {
+        $this->job = $job;
+        $this->fs = get_file_storage();
+        $this->context = manager::context();
+    }
+
+    /**
+     * Whether a stored file's content is missing or unreadable on disk.
+     *
+     * @param \stored_file $file
+     * @return bool
+     */
+    public static function content_missing(\stored_file $file): bool {
+        try {
+            $handle = $file->get_content_file_handle();
+            if ($handle === false) {
+                return true;
+            }
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
+            return false;
+        } catch (\Throwable $e) {
+            return true;
+        }
+    }
+
+    /**
+     * Match target files and create one item row per target.
+     *
+     * @return void
+     */
+    public function prepare() {
+        global $DB;
+
+        $matcher = new matcher(manager::decode_criteria($this->job), false);
+        $rs = $matcher->get_recordset();
+
+        $count = 0;
+        $bytes = 0;
+        $batch = [];
+
+        foreach ($rs as $file) {
+            $stored = $this->fs->get_file_by_id((int) $file->id);
+            if (!$stored || $stored->is_directory()) {
+                continue;
+            }
+
+            // In "missing only" mode we keep just the broken files.
+            if ($this->job->missingonly && !self::content_missing($stored)) {
+                continue;
+            }
+
+            // Decide which replacement applies, and flag targets that have none.
+            $replacement = $this->resolve_replacement($file->filename);
+            $status = 'pending';
+            $note = null;
+            if (!$replacement) {
+                $status = 'skipped';
+                $note = get_string('noreplacement', 'tool_imageextractor');
+            }
+
+            $item = new \stdClass();
+            $item->jobid = (int) $this->job->id;
+            $item->fileid = (int) $file->id;
+            $item->contenthash = $file->contenthash;
+            $item->filename = $file->filename;
+            $item->filesize = (int) $file->filesize;
+            $item->mimetype = $file->mimetype;
+            $item->contextid = (int) $file->contextid;
+            $item->component = $file->component;
+            $item->filearea = $file->filearea;
+            $item->filepath = $file->filepath;
+            $item->fileitemid = (int) $file->itemid;
+            $item->uploaderid = (int) $file->userid;
+            $item->filetimecreated = (int) $file->timecreated;
+            $item->courseid = 0;
+            $item->outputname = '';
+            $item->replacementname = $replacement ? $replacement->get_filename() : null;
+            $item->note = $note;
+            $item->volume = 0;
+            $item->status = $status;
+            $item->timeprocessed = 0;
+            $batch[] = $item;
+
+            $count++;
+            $bytes += (int) $file->filesize;
+
+            if (count($batch) >= 1000) {
+                $DB->insert_records('tool_imageextractor_item', $batch);
+                $batch = [];
+            }
+        }
+        if ($batch) {
+            $DB->insert_records('tool_imageextractor_item', $batch);
+        }
+        $rs->close();
+
+        $DB->set_field('tool_imageextractor_job', 'totalmatched', $count, ['id' => $this->job->id]);
+        $DB->set_field('tool_imageextractor_job', 'totalbytes', $bytes, ['id' => $this->job->id]);
+    }
+
+    /**
+     * Replace the content of up to $limit pending targets.
+     *
+     * @param int $limit
+     * @return int Number of targets still pending after this batch.
+     */
+    public function apply_batch(int $limit): int {
+        global $DB;
+
+        $items = $DB->get_records(
+            'tool_imageextractor_item',
+            ['jobid' => $this->job->id, 'status' => 'pending'],
+            'id ASC',
+            '*',
+            0,
+            $limit
+        );
+
+        $done = 0;
+        $failed = 0;
+        foreach ($items as $item) {
+            try {
+                $this->replace_one($item);
+                $DB->update_record('tool_imageextractor_item', (object) [
+                    'id'            => $item->id,
+                    'status'        => 'done',
+                    'timeprocessed' => time(),
+                    'note'          => get_string('replaced', 'tool_imageextractor'),
+                ]);
+                $done++;
+            } catch (\Throwable $e) {
+                $DB->update_record('tool_imageextractor_item', (object) [
+                    'id'            => $item->id,
+                    'status'        => 'failed',
+                    'timeprocessed' => time(),
+                    'note'          => $e->getMessage(),
+                ]);
+                $failed++;
+                mtrace('tool_imageextractor: replace failed for item ' . $item->id . ': ' . $e->getMessage());
+            }
+        }
+
+        if ($done) {
+            $DB->execute(
+                'UPDATE {tool_imageextractor_job} SET processedcount = processedcount + :c WHERE id = :id',
+                ['c' => $done, 'id' => $this->job->id]
+            );
+        }
+        if ($failed) {
+            $DB->execute(
+                'UPDATE {tool_imageextractor_job} SET failedcount = failedcount + :c WHERE id = :id',
+                ['c' => $failed, 'id' => $this->job->id]
+            );
+        }
+
+        return $DB->count_records(
+            'tool_imageextractor_item',
+            ['jobid' => $this->job->id, 'status' => 'pending']
+        );
+    }
+
+    /**
+     * Restore up to $limit replaced targets from their backups.
+     *
+     * @param int $limit
+     * @return int Number of restorable targets still remaining.
+     */
+    public function restore_batch(int $limit): int {
+        global $DB;
+
+        $items = $DB->get_records(
+            'tool_imageextractor_item',
+            ['jobid' => $this->job->id, 'status' => 'done'],
+            'id ASC',
+            '*',
+            0,
+            $limit
+        );
+
+        foreach ($items as $item) {
+            $backup = $this->fs->get_file(
+                $this->context->id,
+                manager::COMPONENT,
+                'backup',
+                (int) $item->id,
+                '/',
+                $item->filename
+            );
+            if (!$backup) {
+                $DB->set_field('tool_imageextractor_item', 'status', 'restorefailed', ['id' => $item->id]);
+                $DB->set_field(
+                    'tool_imageextractor_item',
+                    'note',
+                    get_string('nobackup', 'tool_imageextractor'),
+                    ['id' => $item->id]
+                );
+                continue;
+            }
+            try {
+                $this->write_to_location($item, $backup);
+                $this->fs->delete_area_files($this->context->id, manager::COMPONENT, 'backup', (int) $item->id);
+                $DB->update_record('tool_imageextractor_item', (object) [
+                    'id'            => $item->id,
+                    'status'        => 'restored',
+                    'timeprocessed' => time(),
+                    'note'          => get_string('restored', 'tool_imageextractor'),
+                ]);
+            } catch (\Throwable $e) {
+                $DB->set_field('tool_imageextractor_item', 'status', 'restorefailed', ['id' => $item->id]);
+                $DB->set_field('tool_imageextractor_item', 'note', $e->getMessage(), ['id' => $item->id]);
+                mtrace('tool_imageextractor: restore failed for item ' . $item->id . ': ' . $e->getMessage());
+            }
+        }
+
+        return $DB->count_records(
+            'tool_imageextractor_item',
+            ['jobid' => $this->job->id, 'status' => 'done']
+        );
+    }
+
+    /**
+     * Back up and replace one target's content.
+     *
+     * @param \stdClass $item
+     * @return void
+     */
+    protected function replace_one(\stdClass $item) {
+        $replacement = $this->resolve_replacement($item->filename);
+        if (!$replacement) {
+            throw new \moodle_exception('noreplacement', 'tool_imageextractor');
+        }
+
+        $existing = $this->fs->get_file(
+            $item->contextid,
+            $item->component,
+            $item->filearea,
+            (int) $item->fileitemid,
+            $item->filepath,
+            $item->filename
+        );
+
+        // Back up the original content first, when present and requested.
+        if ($this->job->backup && $existing && !self::content_missing($existing)) {
+            $this->fs->delete_area_files($this->context->id, manager::COMPONENT, 'backup', (int) $item->id);
+            $this->fs->create_file_from_storedfile([
+                'contextid' => $this->context->id,
+                'component' => manager::COMPONENT,
+                'filearea'  => 'backup',
+                'itemid'    => (int) $item->id,
+                'filepath'  => '/',
+                'filename'  => $item->filename,
+            ], $existing);
+        }
+
+        $this->write_to_location($item, $replacement);
+    }
+
+    /**
+     * Write a source file's content into a target item's location, replacing
+     * whatever is there.
+     *
+     * @param \stdClass $item
+     * @param \stored_file $source
+     * @return void
+     */
+    protected function write_to_location(\stdClass $item, \stored_file $source) {
+        $existing = $this->fs->get_file(
+            $item->contextid,
+            $item->component,
+            $item->filearea,
+            (int) $item->fileitemid,
+            $item->filepath,
+            $item->filename
+        );
+        if ($existing) {
+            $existing->delete();
+        }
+        $this->fs->create_file_from_storedfile([
+            'contextid' => (int) $item->contextid,
+            'component' => $item->component,
+            'filearea'  => $item->filearea,
+            'itemid'    => (int) $item->fileitemid,
+            'filepath'  => $item->filepath,
+            'filename'  => $item->filename,
+        ], $source);
+    }
+
+    /**
+     * Find the replacement source for a target filename.
+     *
+     * In single mode the one uploaded replacement is used for every target;
+     * in zip mode the replacement is the uploaded entry whose name matches the
+     * target's filename.
+     *
+     * @param string $targetfilename
+     * @return \stored_file|null
+     */
+    protected function resolve_replacement(string $targetfilename): ?\stored_file {
+        if ($this->job->replacemode === 'single') {
+            if ($this->singlereplacement === false) {
+                $this->singlereplacement = null;
+                $files = $this->fs->get_area_files(
+                    $this->context->id,
+                    manager::COMPONENT,
+                    'replacement',
+                    (int) $this->job->id,
+                    'filename',
+                    false
+                );
+                foreach ($files as $file) {
+                    $this->singlereplacement = $file;
+                    break;
+                }
+            }
+            return $this->singlereplacement;
+        }
+
+        // Zip mode: match by filename, ignoring any folder structure in the
+        // uploaded archive.
+        if ($this->zipmap === null) {
+            $this->zipmap = [];
+            $files = $this->fs->get_area_files(
+                $this->context->id,
+                manager::COMPONENT,
+                'replacement',
+                (int) $this->job->id,
+                'filepath, filename',
+                false
+            );
+            foreach ($files as $file) {
+                $this->zipmap[$file->get_filename()] = $file;
+            }
+        }
+        return $this->zipmap[$targetfilename] ?? null;
+    }
+}

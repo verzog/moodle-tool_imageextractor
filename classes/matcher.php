@@ -1,0 +1,301 @@
+<?php
+// Copyright (c) Skin Cancer College Australasia.
+// All rights reserved.
+//
+// This file is part of a proprietary plugin developed by Skin Cancer
+// College Australasia for use with Moodle. It is NOT free software and is
+// NOT released under the GNU General Public License.
+//
+// Unauthorised copying, distribution, modification, or use of this file,
+// in whole or in part, via any medium, is strictly prohibited without the
+// prior written permission of Skin Cancer College Australasia. The software
+// is provided "as is", without warranty of any kind, express or implied.
+
+/**
+ * Builds and runs the file-storage query for an extraction job.
+ *
+ * @package    tool_imageextractor
+ * @copyright  © Skin Cancer College Australasia
+ * @license    Proprietary — Skin Cancer College Australasia, all rights reserved
+ */
+
+namespace tool_imageextractor;
+
+/**
+ * Translates a job's decoded criteria into a query over the {files} table.
+ *
+ * The matcher never deletes or mutates anything - it only selects file rows
+ * to be copied into the export. Directories (filename '.') and zero-byte
+ * placeholder rows are always excluded.
+ */
+class matcher {
+    /** @var array Decoded criteria for the job. */
+    protected $criteria;
+
+    /** @var bool Whether to collapse duplicate content to one file. */
+    protected $dedupe;
+
+    /** @var int Running counter giving each bound param a unique name. */
+    protected $paramseq = 0;
+
+    /**
+     * Constructor.
+     *
+     * @param array $criteria Decoded criteria (see manager::default_criteria()).
+     * @param bool $dedupe If true, only one file per content hash is matched.
+     */
+    public function __construct(array $criteria, bool $dedupe = true) {
+        $this->criteria = $criteria;
+        $this->dedupe = $dedupe;
+    }
+
+    /**
+     * Produce a fresh unique placeholder name.
+     *
+     * @param string $prefix
+     * @return string
+     */
+    protected function param(string $prefix): string {
+        $this->paramseq++;
+        return $prefix . $this->paramseq;
+    }
+
+    /**
+     * Build the WHERE clause and bound parameters for the whole job.
+     *
+     * @return array [string $where, array $params]
+     */
+    public function get_where(): array {
+        global $DB;
+
+        $clauses = [];
+        $params = [];
+
+        // Never export directory rows or zero-byte placeholders, and require
+        // a real component so transient internal rows are skipped.
+        $clauses[] = "f.filename <> '.'";
+        $clauses[] = 'f.filesize > 0';
+        $clauses[] = "f.component <> ''";
+
+        // Base criteria always apply.
+        [$basewhere, $baseparams] = $this->build_group($this->criteria, 'b');
+        if ($basewhere !== '') {
+            $clauses[] = $basewhere;
+            $params += $baseparams;
+        }
+
+        // Per-row criteria groups (CSV "per-row criteria" mode) are OR'd
+        // together and AND'd onto the base criteria.
+        if (!empty($this->criteria['rows']) && is_array($this->criteria['rows'])) {
+            $orclauses = [];
+            foreach (array_values($this->criteria['rows']) as $i => $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                [$rowwhere, $rowparams] = $this->build_group($row, 'r' . $i . '_');
+                if ($rowwhere !== '') {
+                    $orclauses[] = '(' . $rowwhere . ')';
+                    $params += $rowparams;
+                }
+            }
+            if ($orclauses) {
+                $clauses[] = '(' . implode(' OR ', $orclauses) . ')';
+            }
+        }
+
+        unset($DB);
+        return [implode(' AND ', $clauses), $params];
+    }
+
+    /**
+     * Build the WHERE fragment for one criteria group (base or a CSV row).
+     *
+     * @param array $c Criteria for this group.
+     * @param string $prefix Param-name prefix keeping this group's params distinct.
+     * @return array [string $where, array $params]
+     */
+    protected function build_group(array $c, string $prefix): array {
+        global $DB;
+
+        $clauses = [];
+        $params = [];
+
+        // Restrict to images unless the job explicitly opts out.
+        if (!array_key_exists('imageonly', $c) || !empty($c['imageonly'])) {
+            $p = $this->param($prefix . 'img');
+            $clauses[] = $DB->sql_like('f.mimetype', ':' . $p, false);
+            $params[$p] = 'image/%';
+        }
+
+        // Explicit mime-type list (each entry matched as a prefix).
+        if (!empty($c['mimetypes']) && is_array($c['mimetypes'])) {
+            $mimeors = [];
+            foreach ($c['mimetypes'] as $mime) {
+                $mime = trim((string) $mime);
+                if ($mime === '') {
+                    continue;
+                }
+                $p = $this->param($prefix . 'mime');
+                $mimeors[] = $DB->sql_like('f.mimetype', ':' . $p, false);
+                $params[$p] = $DB->sql_like_escape($mime) . '%';
+            }
+            if ($mimeors) {
+                $clauses[] = '(' . implode(' OR ', $mimeors) . ')';
+            }
+        }
+
+        if (!empty($c['component'])) {
+            $p = $this->param($prefix . 'comp');
+            $clauses[] = 'f.component = :' . $p;
+            $params[$p] = (string) $c['component'];
+        }
+
+        if (!empty($c['filearea'])) {
+            $p = $this->param($prefix . 'area');
+            $clauses[] = 'f.filearea = :' . $p;
+            $params[$p] = (string) $c['filearea'];
+        }
+
+        if (!empty($c['filenamepattern'])) {
+            // Escape the value so any real % or _ are literal, then turn the
+            // user-supplied '*' (which sql_like_escape leaves untouched) into
+            // the SQL wildcard.
+            $pattern = str_replace('*', '%', $DB->sql_like_escape((string) $c['filenamepattern']));
+            $p = $this->param($prefix . 'fn');
+            $clauses[] = $DB->sql_like('f.filename', ':' . $p, false);
+            $params[$p] = $pattern;
+        }
+
+        if (isset($c['minsize']) && $c['minsize'] !== '' && (int) $c['minsize'] > 0) {
+            $p = $this->param($prefix . 'min');
+            $clauses[] = 'f.filesize >= :' . $p;
+            $params[$p] = (int) $c['minsize'];
+        }
+
+        if (isset($c['maxsize']) && $c['maxsize'] !== '' && (int) $c['maxsize'] > 0) {
+            $p = $this->param($prefix . 'max');
+            $clauses[] = 'f.filesize <= :' . $p;
+            $params[$p] = (int) $c['maxsize'];
+        }
+
+        if (!empty($c['datefrom'])) {
+            $p = $this->param($prefix . 'df');
+            $clauses[] = 'f.timecreated >= :' . $p;
+            $params[$p] = (int) $c['datefrom'];
+        }
+
+        if (!empty($c['dateto'])) {
+            $p = $this->param($prefix . 'dt');
+            $clauses[] = 'f.timecreated <= :' . $p;
+            $params[$p] = (int) $c['dateto'];
+        }
+
+        // Uploader scope (CSV scope mode, user identifiers).
+        if (!empty($c['userids']) && is_array($c['userids'])) {
+            $ids = array_values(array_unique(array_map('intval', $c['userids'])));
+            if ($ids) {
+                [$insql, $inparams] = $DB->get_in_or_equal($ids, SQL_PARAMS_NAMED, $prefix . 'uid');
+                $clauses[] = 'f.userid ' . $insql;
+                $params += $inparams;
+            }
+        }
+
+        // Exact filename and/or content-hash match lists (CSV match mode). A
+        // match list pulls files whose filename OR content hash is listed, so
+        // the two predicates are combined with OR, not AND.
+        $matchors = [];
+        if (!empty($c['filenames']) && is_array($c['filenames'])) {
+            $names = array_values(array_unique(array_filter(array_map('strval', $c['filenames']), 'strlen')));
+            if ($names) {
+                [$insql, $inparams] = $DB->get_in_or_equal($names, SQL_PARAMS_NAMED, $prefix . 'name');
+                $matchors[] = 'f.filename ' . $insql;
+                $params += $inparams;
+            }
+        }
+        if (!empty($c['contenthashes']) && is_array($c['contenthashes'])) {
+            $hashes = array_values(array_unique(array_filter(array_map('strval', $c['contenthashes']), 'strlen')));
+            if ($hashes) {
+                [$insql, $inparams] = $DB->get_in_or_equal($hashes, SQL_PARAMS_NAMED, $prefix . 'hash');
+                $matchors[] = 'f.contenthash ' . $insql;
+                $params += $inparams;
+            }
+        }
+        if ($matchors) {
+            $clauses[] = '(' . implode(' OR ', $matchors) . ')';
+        }
+
+        // Course scope (CSV scope mode, course identifiers). A file belongs
+        // to a course when its context is the course context or any context
+        // nested beneath it (activities, blocks). Path containment captures
+        // all of them in one set-based test.
+        if (!empty($c['courseids']) && is_array($c['courseids'])) {
+            $ids = array_values(array_unique(array_map('intval', $c['courseids'])));
+            if ($ids) {
+                [$insql, $inparams] = $DB->get_in_or_equal($ids, SQL_PARAMS_NAMED, $prefix . 'cid');
+                $pathlike = $DB->sql_concat('cc.path', "'/%'");
+                $clauses[] = "EXISTS (
+                    SELECT 1
+                      FROM {context} cc
+                      JOIN {context} fc ON fc.id = f.contextid
+                     WHERE cc.contextlevel = " . CONTEXT_COURSE . "
+                       AND cc.instanceid $insql
+                       AND (fc.id = cc.id OR fc.path LIKE $pathlike)
+                )";
+                $params += $inparams;
+            }
+        }
+
+        return [implode(' AND ', $clauses), $params];
+    }
+
+    /**
+     * Estimate how many files (and how many bytes) the job will export.
+     *
+     * @return array ['count' => int, 'bytes' => int]
+     */
+    public function estimate(): array {
+        global $DB;
+        [$where, $params] = $this->get_where();
+
+        if ($this->dedupe) {
+            // One row per content hash; filesize is constant for a hash, so
+            // grouping by both is safe on PostgreSQL too.
+            $sql = "SELECT COUNT(*) AS cnt, COALESCE(SUM(sub.filesize), 0) AS bytes
+                      FROM (
+                            SELECT f.filesize
+                              FROM {files} f
+                             WHERE $where
+                          GROUP BY f.contenthash, f.filesize
+                           ) sub";
+        } else {
+            $sql = "SELECT COUNT(*) AS cnt, COALESCE(SUM(f.filesize), 0) AS bytes
+                      FROM {files} f
+                     WHERE $where";
+        }
+        $rec = $DB->get_record_sql($sql, $params);
+        return [
+            'count' => (int) ($rec->cnt ?? 0),
+            'bytes' => (int) ($rec->bytes ?? 0),
+        ];
+    }
+
+    /**
+     * Stream the matched file rows.
+     *
+     * Rows are ordered by content hash then id so the caller can collapse
+     * duplicates (when dedupe is on) by skipping repeats of a hash.
+     *
+     * @return \moodle_recordset
+     */
+    public function get_recordset(): \moodle_recordset {
+        global $DB;
+        [$where, $params] = $this->get_where();
+        $sql = "SELECT f.id, f.contenthash, f.filename, f.filepath, f.filesize, f.mimetype,
+                       f.contextid, f.component, f.filearea, f.itemid, f.userid,
+                       f.timecreated, f.author, f.license
+                  FROM {files} f
+                 WHERE $where
+              ORDER BY f.contenthash, f.id";
+        return $DB->get_recordset_sql($sql, $params);
+    }
+}
