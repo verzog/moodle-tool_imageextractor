@@ -157,9 +157,10 @@ class matcher {
         }
 
         if (!empty($c['filenamepattern'])) {
-            // Treat a user-supplied '*' as the SQL wildcard, escaping the rest.
-            $pattern = $DB->sql_like_escape((string) $c['filenamepattern']);
-            $pattern = str_replace('\\*', '%', $pattern);
+            // Escape the value so any real % or _ are literal, then turn the
+            // user-supplied '*' (which sql_like_escape leaves untouched) into
+            // the SQL wildcard.
+            $pattern = str_replace('*', '%', $DB->sql_like_escape((string) $c['filenamepattern']));
             $p = $this->param($prefix . 'fn');
             $clauses[] = $DB->sql_like('f.filename', ':' . $p, false);
             $params[$p] = $pattern;

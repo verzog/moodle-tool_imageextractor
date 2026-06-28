@@ -97,7 +97,10 @@ jobs:
 
       - name: Moodle Code Checker
         if: ${{ !cancelled() }}
-        run: moodle-plugin-ci phpcs --max-warnings 0
+        # Proprietary plugin: exclude the GPL boilerplate sniff (see .phpcs.xml /
+        # CLAUDE.md). moodle-plugin-ci forces --standard=moodle and ignores the
+        # repo .phpcs.xml, so the exclusion is passed on the command line here.
+        run: moodle-plugin-ci phpcs --max-warnings 0 --exclude moodle.Files.BoilerplateComment
 
       - name: Moodle PHPDoc Checker
         if: ${{ !cancelled() }}
