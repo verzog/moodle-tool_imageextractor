@@ -51,22 +51,76 @@ if ($action !== '' && confirm_sesskey()) {
             \core\notification::error(get_string('disabledwarning', 'tool_imageextractor'));
             redirect($viewurl);
         }
+        // Replacing live files is destructive, so restrict it to full site
+        // administrators - the manage capability alone is not enough.
+        if ($isreplace && !is_siteadmin()) {
+            \core\notification::error(get_string('replaceadminonly', 'tool_imageextractor'));
+            redirect($viewurl);
+        }
         if ($confirm) {
             manager::queue_job($id);
             \core\notification::success(get_string('jobqueued', 'tool_imageextractor'));
             redirect($viewurl);
         }
         echo $OUTPUT->header();
-        $estimate = manager::estimate($job);
-        $message = get_string($isreplace ? 'confirmreplace' : 'confirmrun', 'tool_imageextractor', (object) [
-            'count' => $estimate['count'],
-            'size'  => display_size($estimate['bytes']),
-        ]);
-        echo $OUTPUT->confirm(
-            $message,
-            new moodle_url($viewurl, ['action' => 'run', 'confirm' => 1, 'sesskey' => sesskey()]),
-            $viewurl
-        );
+        if ($isreplace) {
+            // Destructive: show a strong warning and a preview of the files that
+            // would be overwritten before asking for a final confirmation.
+            $preview = (new \tool_imageextractor\replacer($job))->preview();
+            echo $OUTPUT->notification(get_string('replacewarning', 'tool_imageextractor'), 'error');
+            echo $OUTPUT->heading(get_string('replacepreviewheading', 'tool_imageextractor'), 3);
+            echo html_writer::div(get_string('replacepreviewsummary', 'tool_imageextractor', (object) [
+                'total'       => $preview['total'],
+                'scanned'     => $preview['scanned'],
+                'willreplace' => $preview['willreplace'],
+                'willskip'    => $preview['willskip'],
+            ]), 'mb-2');
+            if ($preview['truncated']) {
+                echo $OUTPUT->notification(
+                    get_string('replacepreviewtruncated', 'tool_imageextractor', $preview['scanned']),
+                    'info'
+                );
+            }
+            if ($preview['rows']) {
+                $ptable = new html_table();
+                $ptable->attributes['class'] = 'generaltable';
+                $ptable->head = [
+                    get_string('colfilename', 'tool_imageextractor'),
+                    get_string('component', 'tool_imageextractor'),
+                    get_string('filearea', 'tool_imageextractor'),
+                    get_string('colsize', 'tool_imageextractor'),
+                    get_string('replacement', 'tool_imageextractor'),
+                ];
+                foreach ($preview['rows'] as $prow) {
+                    $ptable->data[] = [
+                        s($prow->filename),
+                        s($prow->component),
+                        s($prow->filearea),
+                        display_size((int) $prow->filesize),
+                        $prow->replacement !== null
+                            ? s($prow->replacement)
+                            : html_writer::tag('em', get_string('replacenomatchcell', 'tool_imageextractor')),
+                    ];
+                }
+                echo html_writer::table($ptable);
+            }
+            echo $OUTPUT->confirm(
+                get_string('confirmreplacefinal', 'tool_imageextractor', $preview['willreplace']),
+                new moodle_url($viewurl, ['action' => 'run', 'confirm' => 1, 'sesskey' => sesskey()]),
+                $viewurl
+            );
+        } else {
+            $estimate = manager::estimate($job);
+            $message = get_string('confirmrun', 'tool_imageextractor', (object) [
+                'count' => $estimate['count'],
+                'size'  => display_size($estimate['bytes']),
+            ]);
+            echo $OUTPUT->confirm(
+                $message,
+                new moodle_url($viewurl, ['action' => 'run', 'confirm' => 1, 'sesskey' => sesskey()]),
+                $viewurl
+            );
+        }
         echo $OUTPUT->footer();
         die();
     }
@@ -76,12 +130,17 @@ if ($action !== '' && confirm_sesskey()) {
             \core\notification::error(get_string('disabledwarning', 'tool_imageextractor'));
             redirect($viewurl);
         }
+        if (!is_siteadmin()) {
+            \core\notification::error(get_string('replaceadminonly', 'tool_imageextractor'));
+            redirect($viewurl);
+        }
         if ($confirm) {
             manager::queue_restore($id);
             \core\notification::success(get_string('restorequeued', 'tool_imageextractor'));
             redirect($viewurl);
         }
         echo $OUTPUT->header();
+        echo $OUTPUT->notification(get_string('restorewarning', 'tool_imageextractor'), 'warning');
         echo $OUTPUT->confirm(
             get_string('confirmrestore', 'tool_imageextractor'),
             new moodle_url($viewurl, ['action' => 'restore', 'confirm' => 1, 'sesskey' => sesskey()]),

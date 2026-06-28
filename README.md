@@ -74,6 +74,29 @@ job, review the estimated match count, then run it. Background tasks run on
 cron, so ensure cron is configured. Download the generated ZIP volumes and
 manifest from the job's view page.
 
+Running a replace job from the web shows a warning, a preview of the files that
+would be overwritten, and an "are you sure" confirmation; it is restricted to
+site administrators.
+
+### Command line
+
+Large jobs can also be driven from the CLI (handy when waiting on cron is
+awkward, or for scripting):
+
+```bash
+# List jobs:
+php admin/tool/imageextractor/cli/run_job.php --list
+
+# Dry run (estimate for extract, preview for replace) — changes nothing:
+php admin/tool/imageextractor/cli/run_job.php --jobid=5
+
+# Extract job 5 to completion now:
+php admin/tool/imageextractor/cli/run_job.php --jobid=5 --execute
+
+# Run a destructive replace job (requires both --execute and --confirm):
+php admin/tool/imageextractor/cli/run_job.php --jobid=7 --execute --confirm
+```
+
 ## Configuration
 
 _Site administration > Plugins > Admin tools > Image extractor > Settings_:
