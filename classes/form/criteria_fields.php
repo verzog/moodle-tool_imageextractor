@@ -52,6 +52,17 @@ class criteria_fields {
         );
         $mform->addHelpButton('courseids', 'courses', 'tool_imageextractor');
 
+        // Category scope. Selecting a category includes every course (and
+        // subcategory) beneath it; the matcher resolves that by context path.
+        $mform->addElement(
+            'autocomplete',
+            'categoryids',
+            get_string('categories', 'tool_imageextractor'),
+            \core_course_category::make_categories_list(),
+            ['multiple' => true]
+        );
+        $mform->addHelpButton('categoryids', 'categories', 'tool_imageextractor');
+
         $mform->addElement(
             'text',
             'mimetypes',
@@ -153,6 +164,8 @@ class criteria_fields {
             'imageonly'       => !empty($criteria['imageonly']) ? 1 : 0,
             'courseids'       => !empty($criteria['courseids']) && is_array($criteria['courseids'])
                 ? array_values(array_map('intval', $criteria['courseids'])) : [],
+            'categoryids'     => !empty($criteria['categoryids']) && is_array($criteria['categoryids'])
+                ? array_values(array_map('intval', $criteria['categoryids'])) : [],
             'mimetypes'       => !empty($criteria['mimetypes']) ? implode(', ', $criteria['mimetypes']) : '',
             'component'       => $criteria['component'] ?? '',
             'filearea'        => $criteria['filearea'] ?? '',
