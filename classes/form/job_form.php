@@ -113,6 +113,13 @@ class job_form extends \moodleform {
         $mform->setDefault('volumemb', $defaultvolmb ?: 2048);
         $mform->addHelpButton('volumemb', 'volumemb', 'tool_imageextractor');
 
+        // A no-submit button that recomputes the estimated match count from the
+        // current criteria without saving the job. Registered as no-submit so
+        // it reloads the form (preserving entered values) instead of validating
+        // and saving.
+        $mform->addElement('submit', 'estimatematches', get_string('estimatematches', 'tool_imageextractor'));
+        $mform->registerNoSubmitButton('estimatematches');
+
         $this->add_action_buttons();
     }
 

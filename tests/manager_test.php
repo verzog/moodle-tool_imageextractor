@@ -76,4 +76,31 @@ final class manager_test extends \advanced_testcase {
         $this->assertSame([], $criteria['courseids']);
         $this->assertSame([], $criteria['categoryids']);
     }
+
+    /**
+     * criteria_from_data maps raw form fields to criteria: kilobyte sizes are
+     * converted to bytes, a comma-separated MIME list is split, and id lists
+     * are cleaned - without any database access.
+     */
+    public function test_criteria_from_data(): void {
+        $data = (object) [
+            'imageonly'   => 1,
+            'component'   => ' mod_forum ',
+            'minsizekb'   => 10,
+            'maxsizekb'   => 20,
+            'mimetypes'   => 'image/png, image/jpeg ,',
+            'courseids'   => [5, 5, 0, 7],
+            'categoryids' => [3],
+        ];
+
+        $criteria = manager::criteria_from_data($data);
+
+        $this->assertTrue($criteria['imageonly']);
+        $this->assertSame('mod_forum', $criteria['component']);
+        $this->assertSame(10 * 1024, $criteria['minsize']);
+        $this->assertSame(20 * 1024, $criteria['maxsize']);
+        $this->assertSame(['image/png', 'image/jpeg'], $criteria['mimetypes']);
+        $this->assertSame([5, 7], $criteria['courseids']);
+        $this->assertSame([3], $criteria['categoryids']);
+    }
 }

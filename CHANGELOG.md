@@ -6,6 +6,22 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.4.2-beta] — 2026-07-01
+
+Build `2026070102`.
+
+### Added
+- **Estimate button** on the extract form: recomputes the approximate match
+  count and total size from the current criteria (course, category, component,
+  MIME, size, date, etc.) without saving the job. The estimate reflects the
+  criteria fields only and ignores CSV refinement.
+
+### Changed
+- Extracted the form-to-criteria mapping into a reusable
+  `manager::criteria_from_data()` (shared by `save_job` and the new estimate),
+  with id-list cleaning centralised in a helper. Behaviour is unchanged; the
+  mapping is now unit-tested directly.
+
 ## [0.4.1-beta] — 2026-07-01
 
 Build `2026070101`.
@@ -84,6 +100,7 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.4.2-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.4.1-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.4.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.3.0]: https://github.com/verzog/moodle-tool_imageextractor

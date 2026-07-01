@@ -93,6 +93,50 @@ class manager {
     }
 
     /**
+     * Build the criteria array from submitted form fields, without touching the
+     * database or any uploaded CSV. Shared by save_job (which then folds in CSV
+     * refinement) and the form's "Estimate" preview (which does not).
+     *
+     * @param \stdClass $data Submitted form data.
+     * @return array Criteria in the shape of default_criteria().
+     */
+    public static function criteria_from_data(\stdClass $data): array {
+        $criteria = self::default_criteria();
+        $criteria['imageonly'] = !empty($data->imageonly);
+        $criteria['component'] = trim((string) ($data->component ?? ''));
+        $criteria['filearea'] = trim((string) ($data->filearea ?? ''));
+        $criteria['filenamepattern'] = trim((string) ($data->filenamepattern ?? ''));
+        $criteria['minsize'] = !empty($data->minsizekb) ? (int) $data->minsizekb * 1024 : 0;
+        $criteria['maxsize'] = !empty($data->maxsizekb) ? (int) $data->maxsizekb * 1024 : 0;
+        $criteria['datefrom'] = !empty($data->datefrom) ? (int) $data->datefrom : 0;
+        $criteria['dateto'] = !empty($data->dateto) ? (int) $data->dateto : 0;
+
+        $mimetypes = trim((string) ($data->mimetypes ?? ''));
+        if ($mimetypes !== '') {
+            $criteria['mimetypes'] = array_values(array_filter(array_map('trim', explode(',', $mimetypes)), 'strlen'));
+        }
+
+        $criteria['courseids'] = self::clean_ids($data->courseids ?? null);
+        $criteria['categoryids'] = self::clean_ids($data->categoryids ?? null);
+
+        return $criteria;
+    }
+
+    /**
+     * Normalise a submitted list of ids: cast to int, drop 0/negatives and
+     * duplicates, and reindex.
+     *
+     * @param mixed $raw Array of ids, or anything else (treated as empty).
+     * @return int[]
+     */
+    protected static function clean_ids($raw): array {
+        if (empty($raw) || !is_array($raw)) {
+            return [];
+        }
+        return array_values(array_unique(array_filter(array_map('intval', $raw), fn($id) => $id > 0)));
+    }
+
+    /**
      * Load one job.
      *
      * @param int $id
@@ -151,32 +195,10 @@ class manager {
         $now = time();
         $context = self::context();
 
-        $criteria = self::default_criteria();
-        $criteria['imageonly'] = !empty($data->imageonly);
-        $criteria['component'] = trim((string) ($data->component ?? ''));
-        $criteria['filearea'] = trim((string) ($data->filearea ?? ''));
-        $criteria['filenamepattern'] = trim((string) ($data->filenamepattern ?? ''));
-        $criteria['minsize'] = !empty($data->minsizekb) ? (int) $data->minsizekb * 1024 : 0;
-        $criteria['maxsize'] = !empty($data->maxsizekb) ? (int) $data->maxsizekb * 1024 : 0;
-        $criteria['datefrom'] = !empty($data->datefrom) ? (int) $data->datefrom : 0;
-        $criteria['dateto'] = !empty($data->dateto) ? (int) $data->dateto : 0;
-
-        $mimetypes = trim((string) ($data->mimetypes ?? ''));
-        if ($mimetypes !== '') {
-            $criteria['mimetypes'] = array_values(array_filter(array_map('trim', explode(',', $mimetypes)), 'strlen'));
-        }
-
-        // Course and category scope chosen directly in the form (autocompletes
-        // yield arrays of ids).
-        $formcourseids = [];
-        if (!empty($data->courseids) && is_array($data->courseids)) {
-            $formcourseids = array_values(array_unique(array_filter(array_map('intval', $data->courseids))));
-        }
-        $criteria['courseids'] = $formcourseids;
-
-        if (!empty($data->categoryids) && is_array($data->categoryids)) {
-            $criteria['categoryids'] = array_values(array_unique(array_filter(array_map('intval', $data->categoryids))));
-        }
+        $criteria = self::criteria_from_data($data);
+        // Remember the form's own course scope so it can be unioned back in
+        // after any CSV scope list is merged below.
+        $formcourseids = $criteria['courseids'];
 
         $csvmode = $data->csvmode ?? 'none';
         $warnings = [];
