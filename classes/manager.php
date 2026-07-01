@@ -84,6 +84,7 @@ class manager {
             'filenamepattern' => '',
             'mimetypes'       => [],
             'courseids'       => [],
+            'categoryids'     => [],
             'minsize'         => 0,
             'maxsize'         => 0,
             'datefrom'        => 0,
@@ -165,12 +166,17 @@ class manager {
             $criteria['mimetypes'] = array_values(array_filter(array_map('trim', explode(',', $mimetypes)), 'strlen'));
         }
 
-        // Course scope chosen directly in the form (autocomplete yields ids).
+        // Course and category scope chosen directly in the form (autocompletes
+        // yield arrays of ids).
         $formcourseids = [];
         if (!empty($data->courseids) && is_array($data->courseids)) {
             $formcourseids = array_values(array_unique(array_filter(array_map('intval', $data->courseids))));
         }
         $criteria['courseids'] = $formcourseids;
+
+        if (!empty($data->categoryids) && is_array($data->categoryids)) {
+            $criteria['categoryids'] = array_values(array_unique(array_filter(array_map('intval', $data->categoryids))));
+        }
 
         $csvmode = $data->csvmode ?? 'none';
         $warnings = [];

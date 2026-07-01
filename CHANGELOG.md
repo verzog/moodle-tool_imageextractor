@@ -6,6 +6,20 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.4.1-beta] — 2026-07-01
+
+Build `2026070101`.
+
+### Added
+- **Category scope**: the extract and replace forms now include a course
+  category picker. Selecting a category includes every course beneath it —
+  including nested subcategories — resolved by context path. Category scope is
+  combined (union) with the course picker, so a file matches when it is in any
+  selected course *or* category.
+- Test coverage for category scoping (`matcher_test`) and for how the form's
+  course/category selections are folded into a job's stored criteria
+  (`manager_test`).
+
 ## [0.4.0-beta] — 2026-07-01
 
 Build `2026070100`.
@@ -70,6 +84,7 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.4.1-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.4.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.3.0]: https://github.com/verzog/moodle-tool_imageextractor
 [0.2.1]: https://github.com/verzog/moodle-tool_imageextractor

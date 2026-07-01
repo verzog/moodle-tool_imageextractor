@@ -224,28 +224,64 @@ class matcher {
             $clauses[] = '(' . implode(' OR ', $matchors) . ')';
         }
 
-        // Course scope (CSV scope mode, course identifiers). A file belongs
-        // to a course when its context is the course context or any context
-        // nested beneath it (activities, blocks). Path containment captures
-        // all of them in one set-based test.
-        if (!empty($c['courseids']) && is_array($c['courseids'])) {
-            $ids = array_values(array_unique(array_map('intval', $c['courseids'])));
-            if ($ids) {
-                [$insql, $inparams] = $DB->get_in_or_equal($ids, SQL_PARAMS_NAMED, $prefix . 'cid');
-                $pathlike = $DB->sql_concat('cc.path', "'/%'");
-                $clauses[] = "EXISTS (
-                    SELECT 1
-                      FROM {context} cc
-                      JOIN {context} fc ON fc.id = f.contextid
-                     WHERE cc.contextlevel = " . CONTEXT_COURSE . "
-                       AND cc.instanceid $insql
-                       AND (fc.id = cc.id OR fc.path LIKE $pathlike)
-                )";
-                $params += $inparams;
-            }
+        // Location scope: files may be limited to given courses and/or course
+        // categories (from the form, or a CSV scope list of course ids). A file
+        // belongs to a course/category when its context is that context or any
+        // context nested beneath it - subcategories, courses, activities,
+        // blocks. Path containment captures all of them in one set-based test.
+        // Course and category scope are OR'd together, so picking both widens
+        // (union) the result rather than narrowing it.
+        $locationors = [];
+        $courseexists = $this->context_scope_exists($c['courseids'] ?? null, CONTEXT_COURSE, $prefix . 'cid', $params);
+        if ($courseexists !== '') {
+            $locationors[] = $courseexists;
+        }
+        $catexists = $this->context_scope_exists($c['categoryids'] ?? null, CONTEXT_COURSECAT, $prefix . 'cat', $params);
+        if ($catexists !== '') {
+            $locationors[] = $catexists;
+        }
+        if ($locationors) {
+            $clauses[] = '(' . implode(' OR ', $locationors) . ')';
         }
 
         return [implode(' AND ', $clauses), $params];
+    }
+
+    /**
+     * Build an EXISTS test matching files whose context is one of the given
+     * instances at a context level, or nested beneath it via path containment.
+     *
+     * @param mixed $rawids Array of instance ids (course or category), or null.
+     * @param int $contextlevel CONTEXT_COURSE or CONTEXT_COURSECAT.
+     * @param string $paramprefix Unique prefix for this group's bound params.
+     * @param array $params Bound-param accumulator, appended to by reference.
+     * @return string SQL EXISTS fragment, or '' when there are no usable ids.
+     */
+    protected function context_scope_exists($rawids, int $contextlevel, string $paramprefix, array &$params): string {
+        global $DB;
+
+        if (empty($rawids) || !is_array($rawids)) {
+            return '';
+        }
+        // Drop 0/negative ids: course 0 is the site and a 0 category is "none";
+        // neither is a meaningful scope and would otherwise match nothing.
+        $ids = array_values(array_unique(array_filter(array_map('intval', $rawids), fn($id) => $id > 0)));
+        if (!$ids) {
+            return '';
+        }
+
+        [$insql, $inparams] = $DB->get_in_or_equal($ids, SQL_PARAMS_NAMED, $paramprefix);
+        $pathlike = $DB->sql_concat('cc.path', "'/%'");
+        $params += $inparams;
+
+        return "EXISTS (
+            SELECT 1
+              FROM {context} cc
+              JOIN {context} fc ON fc.id = f.contextid
+             WHERE cc.contextlevel = $contextlevel
+               AND cc.instanceid $insql
+               AND (fc.id = cc.id OR fc.path LIKE $pathlike)
+        )";
     }
 
     /**

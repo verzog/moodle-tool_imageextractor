@@ -97,6 +97,47 @@ final class matcher_test extends \advanced_testcase {
     }
 
     /**
+     * Category scope restricts matches to files inside courses beneath the
+     * given category (directly or via a subcategory), and OR's with course
+     * scope rather than intersecting it.
+     */
+    public function test_category_scope(): void {
+        $this->resetAfterTest();
+        $generator = $this->getDataGenerator();
+
+        $parentcat = $generator->create_category();
+        $subcat = $generator->create_category(['parent' => $parentcat->id]);
+        $othercat = $generator->create_category();
+
+        $incourse = $generator->create_course(['category' => $subcat->id]);
+        $othercourse = $generator->create_course(['category' => $othercat->id]);
+
+        $this->make_file(\context_course::instance($incourse->id)->id, 'undercat.png', 'A');
+        $this->make_file(\context_course::instance($othercourse->id)->id, 'elsewhere.png', 'B');
+        $this->make_file(\context_system::instance()->id, 'system.png', 'C');
+
+        // Scoping to the parent category picks up the course nested under its
+        // subcategory, but not the course in an unrelated category.
+        $matcher = new matcher([
+            'imageonly'   => true,
+            'component'   => 'mod_label',
+            'filearea'    => 'intro',
+            'categoryids' => [$parentcat->id],
+        ], false);
+        $this->assertSame(1, $matcher->estimate()['count']);
+
+        // Course + category scope is a union: both files are matched.
+        $matcher = new matcher([
+            'imageonly'   => true,
+            'component'   => 'mod_label',
+            'filearea'    => 'intro',
+            'courseids'   => [$othercourse->id],
+            'categoryids' => [$parentcat->id],
+        ], false);
+        $this->assertSame(2, $matcher->estimate()['count']);
+    }
+
+    /**
      * De-duplication collapses identical content to one match.
      */
     public function test_dedupe(): void {
