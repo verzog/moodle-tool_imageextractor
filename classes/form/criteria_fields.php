@@ -41,6 +41,17 @@ class criteria_fields {
         );
         $mform->setDefault('imageonly', 1);
 
+        // Course scope. The 'course' element is an autocomplete that yields an
+        // array of course ids; the matcher restricts to files whose context is
+        // one of these courses or nested beneath it (activities, blocks).
+        $mform->addElement(
+            'course',
+            'courseids',
+            get_string('courses', 'tool_imageextractor'),
+            ['multiple' => true, 'includefrontpage' => false]
+        );
+        $mform->addHelpButton('courseids', 'courses', 'tool_imageextractor');
+
         $mform->addElement(
             'text',
             'mimetypes',
@@ -140,6 +151,8 @@ class criteria_fields {
     public static function defaults_from_criteria(array $criteria): array {
         return [
             'imageonly'       => !empty($criteria['imageonly']) ? 1 : 0,
+            'courseids'       => !empty($criteria['courseids']) && is_array($criteria['courseids'])
+                ? array_values(array_map('intval', $criteria['courseids'])) : [],
             'mimetypes'       => !empty($criteria['mimetypes']) ? implode(', ', $criteria['mimetypes']) : '',
             'component'       => $criteria['component'] ?? '',
             'filearea'        => $criteria['filearea'] ?? '',

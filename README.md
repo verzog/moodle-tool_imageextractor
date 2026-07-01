@@ -13,8 +13,8 @@ release history.
 ## Features
 
 ### Extract
-- Search the Moodle file storage by component, file area, MIME type, filename
-  pattern, size range and creation date.
+- Search the Moodle file storage by course, component, file area, MIME type,
+  filename pattern, size range and creation date.
 - Refine or drive the search with an uploaded **CSV**, interpreted as either:
   - a **scope list** of course or user identifiers,
   - a **match list** of exact filenames or content hashes, or

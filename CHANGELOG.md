@@ -6,9 +6,18 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
-## [0.4.0-beta] — 2026-06-30
+## [0.4.0-beta] — 2026-07-01
 
-Build `2026063000`.
+Build `2026070100`.
+
+### Added
+- **Course scope in the UI**: the extract and replace forms now include a
+  course autocomplete so a search can be limited to one or more specific
+  courses without needing a CSV. A file counts as belonging to a course when
+  its context is the course context or any context nested beneath it
+  (activities, blocks). Courses picked in the form are combined (union) with
+  any courses supplied by a scope-list CSV. (The matcher already supported
+  course scoping; this exposes it directly.)
 
 ### Changed
 - Promoted plugin maturity from **alpha** to **beta** (`MATURITY_BETA`). The

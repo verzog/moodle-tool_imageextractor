@@ -83,6 +83,7 @@ class manager {
             'filearea'        => '',
             'filenamepattern' => '',
             'mimetypes'       => [],
+            'courseids'       => [],
             'minsize'         => 0,
             'maxsize'         => 0,
             'datefrom'        => 0,
@@ -164,6 +165,13 @@ class manager {
             $criteria['mimetypes'] = array_values(array_filter(array_map('trim', explode(',', $mimetypes)), 'strlen'));
         }
 
+        // Course scope chosen directly in the form (autocomplete yields ids).
+        $formcourseids = [];
+        if (!empty($data->courseids) && is_array($data->courseids)) {
+            $formcourseids = array_values(array_unique(array_filter(array_map('intval', $data->courseids))));
+        }
+        $criteria['courseids'] = $formcourseids;
+
         $csvmode = $data->csvmode ?? 'none';
         $warnings = [];
         if ($csvmode !== 'none' && !empty($data->csvfile)) {
@@ -174,6 +182,15 @@ class manager {
                 $criteria = array_merge($criteria, $result['criteria']);
                 $warnings = $result['warnings'];
             }
+        }
+
+        // The CSV merge above may have supplied its own course scope (scope
+        // mode). Combine it with the form's selection so both are honoured as a
+        // union rather than one silently overwriting the other.
+        if ($formcourseids) {
+            $csvcourseids = (!empty($criteria['courseids']) && is_array($criteria['courseids']))
+                ? array_map('intval', $criteria['courseids']) : [];
+            $criteria['courseids'] = array_values(array_unique(array_merge($csvcourseids, $formcourseids)));
         }
 
         $defaultvolmb = (int) get_config('tool_imageextractor', 'default_volume_mb');
