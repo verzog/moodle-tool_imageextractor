@@ -136,6 +136,11 @@ if ($data = $mform->get_data()) {
 // The "Estimate" button reloads the form without saving; compute a rough match
 // count from the entered criteria (ignoring any CSV refinement) to show above
 // the form. Only the extract form carries this button.
+if (!$isreplace) {
+    // Enhance the extract form with a live match-count estimate.
+    $PAGE->requires->js_call_amd('tool_imageextractor/estimate', 'init');
+}
+
 $estimate = null;
 if (!$isreplace && $mform->no_submit_button_pressed()) {
     $submitted = $mform->get_submitted_data();

@@ -120,6 +120,16 @@ class job_form extends \moodleform {
         $mform->addElement('submit', 'estimatematches', get_string('estimatematches', 'tool_imageextractor'));
         $mform->registerNoSubmitButton('estimatematches');
 
+        // Inline region that the estimate AMD module updates live as criteria
+        // change. Falls back to the Estimate button above when JavaScript is
+        // unavailable.
+        $mform->addElement(
+            'static',
+            'estimatelive',
+            get_string('estimatelive', 'tool_imageextractor'),
+            \html_writer::span('—', 'tool_imageextractor-estimate', ['data-region' => 'tool_imageextractor-estimate'])
+        );
+
         $this->add_action_buttons();
     }
 

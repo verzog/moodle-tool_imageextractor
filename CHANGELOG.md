@@ -6,6 +6,22 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.5.0-beta] — 2026-07-01
+
+Build `2026070103`.
+
+### Added
+- **Live estimate** on the extract form: as you change the criteria (course,
+  category, component, MIME, size, dates…), an inline region updates with an
+  approximate match count and total size — no button press or page reload. This
+  is progressive enhancement over the existing **Estimate matches** button,
+  which remains as a no-JavaScript fallback.
+- New read-only web service `tool_imageextractor_estimate_matches`
+  (`classes/external/estimate_matches.php`, `db/services.php`) that the AMD
+  module `tool_imageextractor/estimate` calls; it reuses `criteria_from_data`
+  and the matcher, and requires the `tool/imageextractor:manage` capability.
+- Test coverage for the web service (counts, course scope, capability check).
+
 ## [0.4.2-beta] — 2026-07-01
 
 Build `2026070102`.

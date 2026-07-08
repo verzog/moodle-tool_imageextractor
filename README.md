@@ -6,7 +6,7 @@ and either **exporting** them (with metadata and naming rules) or
 sets (50 GB or more) by doing all heavy work in throttled, resumable background
 tasks.
 
-**Status:** beta (release `0.4.2-beta`). Feature-complete and CI-tested; suitable
+**Status:** beta (release `0.5.0-beta`). Feature-complete and CI-tested; suitable
 for testing on non-production sites. See [`CHANGELOG.md`](CHANGELOG.md) for the
 release history.
 
@@ -75,10 +75,11 @@ complete the installation.
 
 Go to _Site administration > Plugins > Admin tools > Image extractor_. Create a
 job, review the estimated match count, then run it. While editing an extract
-job you can press **Estimate matches** to see an approximate count and total
-size for the current criteria (course, category, MIME type, size, and so on)
-before saving; this preview reflects the criteria fields only and ignores CSV
-refinement. Background tasks run on cron, so ensure cron is configured.
+job, a **live estimate** of the approximate match count and total size updates
+as you change the criteria (course, category, MIME type, size, and so on); if
+JavaScript is unavailable, press **Estimate matches** for the same figure via a
+page reload. Either way the estimate reflects the criteria fields only and
+ignores CSV refinement. Background tasks run on cron, so ensure cron is configured.
 Download the generated ZIP volumes and manifest from the job's view page.
 
 Running a replace job from the web shows a warning, a preview of the files that
