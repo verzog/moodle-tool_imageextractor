@@ -81,7 +81,10 @@ foreach ($jobs as $job) {
     $statuslabel = get_string('jobstatus_' . $job->status, 'tool_imageextractor');
 
     $isrunning = in_array($job->status, [manager::STATUS_QUEUED, manager::STATUS_PROCESSING], true);
-    if ($job->jobtype === 'replace' && $isrunning && (int) $job->totalmatched === 0) {
+    if ($job->status === manager::STATUS_CLEARING) {
+        // Results are being removed in the background; no meaningful progress.
+        $progress = get_string('clearing', 'tool_imageextractor');
+    } else if ($job->jobtype === 'replace' && $isrunning && (int) $job->totalmatched === 0) {
         // The analyse phase has no totals until it finishes.
         $progress = get_string('analysing', 'tool_imageextractor');
     } else {

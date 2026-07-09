@@ -38,6 +38,9 @@ class manager {
     /** @var string Replace job analysed; awaiting admin review before applying. */
     const STATUS_REVIEW = 'review';
 
+    /** @var string A prior run's results are being removed in the background. */
+    const STATUS_CLEARING = 'clearing';
+
     /** @var string Finished successfully. */
     const STATUS_COMPLETED = 'completed';
 
@@ -267,13 +270,11 @@ class manager {
             // would keep offering stale downloads from the old definition. We
             // skip this while a run is in flight, and for replace jobs that
             // still hold restorable backups (those must be restored or cleared
-            // explicitly so originals are never silently discarded).
+            // explicitly so originals are never silently discarded). A large
+            // result set is removed in the background (reset_results defers it)
+            // so saving the form cannot time out at the gateway.
             if (!$running && !self::has_restorable($record->id)) {
-                self::clear_results($record->id);
-                $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_DRAFT, ['id' => $record->id]);
-                $DB->set_field('tool_imageextractor_job', 'error', null, ['id' => $record->id]);
-                $DB->set_field('tool_imageextractor_job', 'timestarted', 0, ['id' => $record->id]);
-                $DB->set_field('tool_imageextractor_job', 'timecompleted', 0, ['id' => $record->id]);
+                self::reset_results($record->id);
             }
         } else {
             $record->status = self::STATUS_DRAFT;
@@ -404,8 +405,12 @@ class manager {
             return;
         }
 
-        // Reset run state so a re-run starts cleanly.
-        self::clear_results($jobid);
+        // Reset run state so a re-run starts cleanly. The counters are zeroed
+        // here (cheap), but any previous run's item rows and backup files -
+        // which can number in the millions - are NOT deleted synchronously:
+        // that could exceed the gateway timeout. The processing task clears
+        // them on the next cron (clearfirst), so queueing returns immediately.
+        self::zero_counters($jobid);
         $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_QUEUED, ['id' => $jobid]);
         $DB->set_field('tool_imageextractor_job', 'error', null, ['id' => $jobid]);
         $DB->set_field('tool_imageextractor_job', 'timestarted', 0, ['id' => $jobid]);
@@ -413,15 +418,16 @@ class manager {
 
         if ($job->jobtype === 'replace') {
             // No prior analyse phase (e.g. driven from the CLI): the apply task
-            // prepares the targets itself before its first batch.
+            // clears any stale results and prepares the targets itself before
+            // its first batch.
             $task = new task\process_replace();
-            $task->set_custom_data(['jobid' => $jobid, 'op' => 'apply']);
+            $task->set_custom_data(['jobid' => $jobid, 'op' => 'apply', 'clearfirst' => true]);
             \core\task\manager::queue_adhoc_task($task, true);
             return;
         }
 
         $task = new task\process_job();
-        $task->set_custom_data(['jobid' => $jobid]);
+        $task->set_custom_data(['jobid' => $jobid, 'clearfirst' => true]);
         \core\task\manager::queue_adhoc_task($task, true);
     }
 
@@ -450,7 +456,11 @@ class manager {
             throw new \moodle_exception('cannotrerunwithbackups', 'tool_imageextractor');
         }
 
-        self::clear_results($jobid);
+        // Zero the counters now (cheap) but defer deleting any previous
+        // analysis' item rows and backups to the task: on a large site that
+        // delete can run for minutes and must not block the web request. The
+        // analyse task clears them before it re-matches.
+        self::zero_counters($jobid);
         $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_QUEUED, ['id' => $jobid]);
         $DB->set_field('tool_imageextractor_job', 'error', null, ['id' => $jobid]);
         $DB->set_field('tool_imageextractor_job', 'timestarted', 0, ['id' => $jobid]);
@@ -459,6 +469,54 @@ class manager {
         $task = new task\process_replace();
         $task->set_custom_data(['jobid' => $jobid, 'op' => 'analyse']);
         \core\task\manager::queue_adhoc_task($task, true);
+    }
+
+    /**
+     * Reset a job's results, returning it to draft. If the job holds prepared
+     * item rows - potentially millions, whose deletion (with their backup
+     * files) can exceed the gateway timeout - the removal is deferred to a
+     * background task that runs on the next cron; the job is parked in the
+     * "clearing" state meanwhile. A job with nothing heavy to remove is reset
+     * inline.
+     *
+     * @param int $jobid
+     * @return bool True if the reset was deferred to a background task.
+     */
+    public static function reset_results(int $jobid): bool {
+        global $DB;
+
+        if ($DB->record_exists('tool_imageextractor_item', ['jobid' => $jobid])) {
+            // Remove the bounded outputs (volumes, manifest, counters) now so
+            // the job page stops advertising and serving the previous run's
+            // downloads the instant it is cleared or edited; defer only the
+            // heavy item-row and per-item backup delete to the task.
+            self::clear_outputs($jobid);
+            $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_CLEARING, ['id' => $jobid]);
+            $DB->set_field('tool_imageextractor_job', 'error', null, ['id' => $jobid]);
+            $task = new task\reset_job();
+            $task->set_custom_data(['jobid' => $jobid]);
+            \core\task\manager::queue_adhoc_task($task, true);
+            return true;
+        }
+
+        self::clear_results($jobid);
+        self::mark_draft($jobid);
+        return false;
+    }
+
+    /**
+     * Return a job to a clean draft state (status and run timestamps only; this
+     * does not touch results - pair it with clear_results()).
+     *
+     * @param int $jobid
+     * @return void
+     */
+    public static function mark_draft(int $jobid): void {
+        global $DB;
+        $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_DRAFT, ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'error', null, ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'timestarted', 0, ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'timecompleted', 0, ['id' => $jobid]);
     }
 
     /**
@@ -562,17 +620,49 @@ class manager {
         );
 
         $DB->delete_records('tool_imageextractor_item', ['jobid' => $jobid]);
+
+        // Remove the bounded, user-visible outputs too.
+        self::clear_outputs($jobid);
+    }
+
+    /**
+     * Remove a job's generated outputs - the ZIP volumes, their rows, the
+     * manifest - and zero its counters, without touching the (potentially huge)
+     * item rows or per-item backups. These artifacts are few and bounded (one
+     * manifest and a handful of volume files), so this is always cheap enough to
+     * run in a web request; it is what the job page advertises for download, so
+     * clearing it synchronously stops stale downloads being served the moment a
+     * job is cleared or edited, even while the heavy item/backup delete is still
+     * deferred to cron.
+     *
+     * @param int $jobid
+     * @return void
+     */
+    public static function clear_outputs(int $jobid): void {
+        global $DB;
+        $fs = get_file_storage();
+        $context = self::context();
+
         // Volumes are stored under the job id as their file-area item id.
         $fs->delete_area_files($context->id, self::COMPONENT, 'volumes', $jobid);
         $DB->delete_records('tool_imageextractor_volume', ['jobid' => $jobid]);
         $fs->delete_area_files($context->id, self::COMPONENT, 'manifest', $jobid);
 
-        $DB->set_field('tool_imageextractor_job', 'totalmatched', 0, ['id' => $jobid]);
-        $DB->set_field('tool_imageextractor_job', 'totalbytes', 0, ['id' => $jobid]);
-        $DB->set_field('tool_imageextractor_job', 'processedcount', 0, ['id' => $jobid]);
-        $DB->set_field('tool_imageextractor_job', 'processedbytes', 0, ['id' => $jobid]);
-        $DB->set_field('tool_imageextractor_job', 'failedcount', 0, ['id' => $jobid]);
-        $DB->set_field('tool_imageextractor_job', 'volumecount', 0, ['id' => $jobid]);
+        self::zero_counters($jobid);
+    }
+
+    /**
+     * Reset a job's progress and totals counters to zero, without touching its
+     * results or status.
+     *
+     * @param int $jobid
+     * @return void
+     */
+    public static function zero_counters(int $jobid): void {
+        global $DB;
+        foreach (['totalmatched', 'totalbytes', 'processedcount', 'processedbytes', 'failedcount', 'volumecount'] as $field) {
+            $DB->set_field('tool_imageextractor_job', $field, 0, ['id' => $jobid]);
+        }
     }
 
     /**

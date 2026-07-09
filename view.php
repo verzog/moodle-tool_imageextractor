@@ -42,7 +42,11 @@ $PAGE->set_url($viewurl);
 $PAGE->set_title(format_string($job->name));
 $PAGE->set_heading(format_string($job->name));
 
-$running = in_array($job->status, [manager::STATUS_QUEUED, manager::STATUS_PROCESSING], true);
+$running = in_array(
+    $job->status,
+    [manager::STATUS_QUEUED, manager::STATUS_PROCESSING, manager::STATUS_CLEARING],
+    true
+);
 $isreplace = ($job->jobtype === 'replace');
 
 // Handle actions.
@@ -146,9 +150,13 @@ if ($action !== '' && confirm_sesskey()) {
     }
 
     if ($action === 'clear' && !$running) {
-        manager::clear_results($id);
-        $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_DRAFT, ['id' => $id]);
-        \core\notification::success(get_string('resultscleared', 'tool_imageextractor'));
+        // A large result set is removed in the background so this cannot time
+        // out; a small one is cleared inline. reset_results picks per job.
+        $deferred = manager::reset_results($id);
+        \core\notification::success(get_string(
+            $deferred ? 'clearqueued' : 'resultscleared',
+            'tool_imageextractor'
+        ));
         redirect($viewurl);
     }
 }
@@ -199,9 +207,15 @@ if ((int) $job->failedcount > 0) {
 echo html_writer::table($summary);
 
 if ($running) {
-    // A replace job with no matched totals yet is still in its background
-    // analyse phase; afterwards the generic processing hint applies.
-    $hint = ($isreplace && (int) $job->totalmatched === 0) ? 'analysinghint' : 'runninghint';
+    // Clearing has its own hint; otherwise a replace job with no matched totals
+    // yet is still analysing, and anything else is the generic processing hint.
+    if ($job->status === manager::STATUS_CLEARING) {
+        $hint = 'clearinghint';
+    } else if ($isreplace && (int) $job->totalmatched === 0) {
+        $hint = 'analysinghint';
+    } else {
+        $hint = 'runninghint';
+    }
     echo $OUTPUT->notification(get_string($hint, 'tool_imageextractor'), 'info');
 }
 

@@ -55,6 +55,10 @@ class process_replace extends \core\task\adhoc_task {
         $data = (object) $this->get_custom_data();
         $jobid = (int) ($data->jobid ?? 0);
         $op = (string) ($data->op ?? 'apply');
+        // A fresh run defers its (potentially huge) clear of the previous run's
+        // items and backups to here, off the web request. A reviewed apply does
+        // not set this - it must consume the prepared targets, not wipe them.
+        $clearfirst = !empty($data->clearfirst);
         if ($jobid <= 0) {
             return;
         }
@@ -104,9 +108,13 @@ class process_replace extends \core\task\adhoc_task {
                 mtrace('tool_imageextractor: analysing replace job ' . $jobid . ' ("' . $job->name . '")');
                 $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_PROCESSING, ['id' => $jobid]);
                 $DB->set_field('tool_imageextractor_job', 'timestarted', time(), ['id' => $jobid]);
-                // Idempotency: a retried analyse (e.g. after an interrupted
-                // run) must not duplicate targets from the partial attempt.
-                $DB->delete_records('tool_imageextractor_item', ['jobid' => $jobid]);
+                // Clear any previous analysis here rather than in the web
+                // request that queued us - on a large site that delete runs for
+                // minutes. This also gives idempotency: a retried analyse (e.g.
+                // after an interrupted run) cannot duplicate the partial
+                // attempt's targets. Only pending targets exist at analyse time,
+                // so nothing restorable is discarded.
+                manager::clear_results($jobid);
                 $replacer->prepare();
                 $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_REVIEW, ['id' => $jobid]);
                 $matched = $DB->get_field('tool_imageextractor_job', 'totalmatched', ['id' => $jobid]);
@@ -118,6 +126,12 @@ class process_replace extends \core\task\adhoc_task {
             if ($job->status === manager::STATUS_QUEUED) {
                 $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_PROCESSING, ['id' => $jobid]);
                 $DB->set_field('tool_imageextractor_job', 'timestarted', time(), ['id' => $jobid]);
+                // A fresh direct apply clears any stale results here (deferred
+                // off the web request); a reviewed apply must not, so its
+                // prepared targets survive to be applied.
+                if ($clearfirst) {
+                    manager::clear_results($jobid);
+                }
                 // A reviewed job already has its targets prepared by the
                 // analyse phase; only prepare here when applying directly
                 // (e.g. from the CLI) so targets are never duplicated.
