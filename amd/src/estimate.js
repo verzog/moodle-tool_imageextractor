@@ -43,8 +43,8 @@ const collect = (form) => {
         return el ? String(el.value).trim() : '';
     };
     const checked = (name) => {
-        // advcheckbox renders a hidden input sharing the name before the real
-        // checkbox, so target the checkbox control explicitly.
+        // An advcheckbox renders a hidden input sharing the name before the
+        // real checkbox, so target the checkbox control explicitly.
         const el = form.querySelector('input[type="checkbox"][name="' + name + '"]');
         return el ? Boolean(el.checked) : false;
     };
