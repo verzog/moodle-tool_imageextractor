@@ -574,7 +574,7 @@ class manager {
             'tool_imageextractor_item',
             ['jobid' => $jobid],
             'id ASC',
-            'id, filename, component, filearea, filesize, replacementname',
+            'id, contextid, component, filearea, fileitemid, filepath, filename, mimetype, filesize, replacementname',
             0,
             $samplelimit
         ));

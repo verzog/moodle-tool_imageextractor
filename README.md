@@ -6,7 +6,7 @@ and either **exporting** them (with metadata and naming rules) or
 sets (50 GB or more) by doing all heavy work in throttled, resumable background
 tasks.
 
-**Status:** beta (release `0.10.0-beta`). Feature-complete and CI-tested; suitable
+**Status:** beta (release `0.11.0-beta`). Feature-complete and CI-tested; suitable
 for testing on non-production sites. See [`CHANGELOG.md`](CHANGELOG.md) for the
 release history.
 
@@ -91,7 +91,9 @@ site administrators. Run first queues a background **analyse** pass that
 matches the targets and resolves their replacements without changing anything
 (so even huge sites cannot time out the page). The job then shows **Awaiting
 review**: the job page presents an exact preview — how many files will be
-replaced or skipped, with a sample — and a final "are you sure" confirmation.
+replaced or skipped, a sample, and a **thumbnail preview of the first few
+targets with the current image and its replacement side by side** — and a
+final "are you sure" confirmation.
 Only confirming that review queues the destructive apply phase; "Clear
 results" discards the analysis instead.
 

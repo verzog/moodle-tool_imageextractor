@@ -182,6 +182,15 @@ final class process_replace_test extends \advanced_testcase {
         $this->assertSame(0, $review['willskip']);
         $this->assertCount(1, $review['rows']);
 
+        // The sample row carries the fields the review page needs to build the
+        // current-image thumbnail (its original location and mime type).
+        $prow = $review['rows'][0];
+        $this->assertSame('mod_label', $prow->component);
+        $this->assertSame('intro', $prow->filearea);
+        $this->assertSame('image/png', $prow->mimetype);
+        $this->assertNotEmpty($prow->contextid);
+        $this->assertSame('/', $prow->filepath);
+
         // Phase 2: confirm and apply.
         manager::queue_job($job->id);
         $this->drain_tasks();

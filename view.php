@@ -230,6 +230,54 @@ if ($isreplace && $job->status === manager::STATUS_REVIEW) {
         'willreplace' => $review['willreplace'],
         'willskip'    => $review['willskip'],
     ]), 'mb-2');
+    // Visual preview: the first few targets with their current image and the
+    // replacement shown side by side, so the outcome is obvious before applying.
+    $thumbrows = array_slice($review['rows'], 0, 5);
+    if ($thumbrows) {
+        echo $OUTPUT->heading(get_string('previewthumbsheading', 'tool_imageextractor'), 4);
+        $ttable = new html_table();
+        $ttable->attributes['class'] = 'generaltable';
+        $ttable->head = [
+            get_string('colcurrentimage', 'tool_imageextractor'),
+            get_string('colreplacementimage', 'tool_imageextractor'),
+            get_string('colfilename', 'tool_imageextractor'),
+        ];
+        foreach ($thumbrows as $prow) {
+            // The current image is served from its own component's pluginfile;
+            // only build a URL for it when the target is actually an image.
+            $oldurl = null;
+            if (strpos((string) $prow->mimetype, 'image/') === 0) {
+                $oldurl = moodle_url::make_pluginfile_url(
+                    $prow->contextid,
+                    $prow->component,
+                    $prow->filearea,
+                    $prow->fileitemid,
+                    $prow->filepath,
+                    $prow->filename
+                );
+            }
+            // The replacement (when this target has one) comes from the job's
+            // own replacement area.
+            $newurl = null;
+            if ($prow->replacementname !== null) {
+                $newurl = moodle_url::make_pluginfile_url(
+                    $context->id,
+                    manager::COMPONENT,
+                    'replacement',
+                    $id,
+                    '/',
+                    $prow->replacementname
+                );
+            }
+            $ttable->data[] = [
+                tool_imageextractor_thumbnail($oldurl, get_string('colcurrentimage', 'tool_imageextractor')),
+                tool_imageextractor_thumbnail($newurl, get_string('colreplacementimage', 'tool_imageextractor')),
+                s($prow->filename),
+            ];
+        }
+        echo html_writer::table($ttable);
+    }
+
     if ($review['truncated']) {
         echo $OUTPUT->notification(
             get_string('reviewtruncated', 'tool_imageextractor', count($review['rows'])),
