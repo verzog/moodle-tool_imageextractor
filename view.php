@@ -24,6 +24,7 @@ require_once($CFG->libdir . '/adminlib.php');
 require_once(__DIR__ . '/lib.php');
 
 use tool_imageextractor\manager;
+use tool_imageextractor\replacer;
 
 $id = required_param('id', PARAM_INT);
 $action = optional_param('action', '', PARAM_ALPHA);
@@ -230,6 +231,59 @@ if ($isreplace && $job->status === manager::STATUS_REVIEW) {
         'willreplace' => $review['willreplace'],
         'willskip'    => $review['willskip'],
     ]), 'mb-2');
+    // Visual preview: the first few targets with their current image and the
+    // replacement shown side by side, so the outcome is obvious before applying.
+    $thumbrows = array_slice($review['rows'], 0, 5);
+    if ($thumbrows) {
+        // Resolve each replacement through the same path the apply uses, so the
+        // preview links the exact file that will be written (with its real
+        // filepath - a ZIP replacement may have stored it inside a folder).
+        $replacer = new replacer($job);
+        echo $OUTPUT->heading(get_string('previewthumbsheading', 'tool_imageextractor'), 4);
+        $ttable = new html_table();
+        $ttable->attributes['class'] = 'generaltable';
+        $ttable->head = [
+            get_string('colcurrentimage', 'tool_imageextractor'),
+            get_string('colreplacementimage', 'tool_imageextractor'),
+            get_string('colfilename', 'tool_imageextractor'),
+        ];
+        foreach ($thumbrows as $prow) {
+            // The current image is served from its own component's pluginfile;
+            // only build a URL for it when the target is actually an image.
+            $oldurl = null;
+            if (strpos((string) $prow->mimetype, 'image/') === 0) {
+                $oldurl = moodle_url::make_pluginfile_url(
+                    $prow->contextid,
+                    $prow->component,
+                    $prow->filearea,
+                    $prow->fileitemid,
+                    $prow->filepath,
+                    $prow->filename
+                );
+            }
+            // The replacement (when this target has one) is the exact stored
+            // file apply would use; build the URL from its real location.
+            $newurl = null;
+            $replacementfile = $replacer->replacement_for($prow->filename);
+            if ($replacementfile) {
+                $newurl = moodle_url::make_pluginfile_url(
+                    $replacementfile->get_contextid(),
+                    $replacementfile->get_component(),
+                    $replacementfile->get_filearea(),
+                    $replacementfile->get_itemid(),
+                    $replacementfile->get_filepath(),
+                    $replacementfile->get_filename()
+                );
+            }
+            $ttable->data[] = [
+                tool_imageextractor_thumbnail($oldurl, get_string('colcurrentimage', 'tool_imageextractor')),
+                tool_imageextractor_thumbnail($newurl, get_string('colreplacementimage', 'tool_imageextractor')),
+                s($prow->filename),
+            ];
+        }
+        echo html_writer::table($ttable);
+    }
+
     if ($review['truncated']) {
         echo $OUTPUT->notification(
             get_string('reviewtruncated', 'tool_imageextractor', count($review['rows'])),

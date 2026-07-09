@@ -413,6 +413,20 @@ class replacer {
     }
 
     /**
+     * The stored replacement file that would be applied to a given target
+     * filename, or null when none matches. Public wrapper over the same
+     * resolution the apply path uses, so the review preview can show (and link
+     * to) the exact file that will be written - including its real filepath
+     * when a ZIP replacement stored it inside a folder.
+     *
+     * @param string $targetfilename
+     * @return \stored_file|null
+     */
+    public function replacement_for(string $targetfilename): ?\stored_file {
+        return $this->resolve_replacement($targetfilename);
+    }
+
+    /**
      * Find the replacement source for a target filename.
      *
      * In single mode the one uploaded replacement is used for every target;

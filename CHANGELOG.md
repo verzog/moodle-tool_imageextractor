@@ -6,6 +6,18 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.11.0-beta] — 2026-07-09
+
+Build `2026070906`.
+
+### Added
+- **Thumbnail preview on the replace review screen.** The "Awaiting review"
+  page now shows the first few matched targets with the **current image and
+  the replacement side by side**, so the outcome is obvious before you confirm
+  a destructive apply. The replacement images are served inline (admin-only,
+  via the plugin's file handler); a non-image target or a target with no
+  matching replacement shows a small "No preview" placeholder instead.
+
 ## [0.10.0-beta] — 2026-07-09
 
 Build `2026070905`.
@@ -295,6 +307,7 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.11.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.10.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.9.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.8.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
