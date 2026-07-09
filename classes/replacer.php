@@ -92,7 +92,10 @@ class replacer {
     public function preview(int $samplelimit = 50, int $scancap = 2000): array {
         $matcher = new matcher(manager::decode_criteria($this->job), false);
         $estimate = $matcher->estimate();
-        $rs = $matcher->get_recordset();
+        // Unordered: sorting the whole matched set is a heavy database
+        // operation and the preview does not care about row order.
+        $rs = $matcher->get_recordset(false);
+        $missingonly = !empty($this->job->missingonly);
 
         $scanned = 0;
         $willreplace = 0;
@@ -104,12 +107,14 @@ class replacer {
                 $truncated = true;
                 break;
             }
-            $stored = $this->fs->get_file_by_id((int) $file->id);
-            if (!$stored || $stored->is_directory()) {
-                continue;
-            }
-            if ($this->job->missingonly && !self::content_missing($stored)) {
-                continue;
+            // Only "missing only" jobs need the stored_file (to inspect the
+            // content); fetching it is one extra query per row, and the
+            // matcher's WHERE already excludes directories and empty rows.
+            if ($missingonly) {
+                $stored = $this->fs->get_file_by_id((int) $file->id);
+                if (!$stored || !self::content_missing($stored)) {
+                    continue;
+                }
             }
             $scanned++;
             $replacement = $this->resolve_replacement($file->filename);
@@ -149,21 +154,26 @@ class replacer {
         global $DB;
 
         $matcher = new matcher(manager::decode_criteria($this->job), false);
-        $rs = $matcher->get_recordset();
+        // Unordered: extract needs hash-sorted rows to collapse duplicates,
+        // but replace targets every match, and the sort forces the database
+        // to materialise the whole matched set before streaming starts.
+        $rs = $matcher->get_recordset(false);
+        $missingonly = !empty($this->job->missingonly);
 
         $count = 0;
         $bytes = 0;
         $batch = [];
 
         foreach ($rs as $file) {
-            $stored = $this->fs->get_file_by_id((int) $file->id);
-            if (!$stored || $stored->is_directory()) {
-                continue;
-            }
-
-            // In "missing only" mode we keep just the broken files.
-            if ($this->job->missingonly && !self::content_missing($stored)) {
-                continue;
+            // In "missing only" mode we keep just the broken files. Only that
+            // mode needs the stored_file hydrated (one extra query per row);
+            // the matcher's WHERE already excludes directories and empty
+            // rows, and apply re-checks each target when it runs.
+            if ($missingonly) {
+                $stored = $this->fs->get_file_by_id((int) $file->id);
+                if (!$stored || !self::content_missing($stored)) {
+                    continue;
+                }
             }
 
             // Decide which replacement applies, and flag targets that have none.

@@ -6,6 +6,25 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.7.1-beta] — 2026-07-09
+
+Build `2026070902`.
+
+### Fixed
+- **Database load while analysing a replace job.** The background analyse
+  (and the CLI dry-run preview) inherited two expensive habits from the
+  extract path:
+  - the matched-files query sorted the **entire** matched set by content hash
+    — an ordering only extract's duplicate-collapsing needs — forcing the
+    database to materialise and sort millions of rows (spilling to temporary
+    disk) before the first row streamed; the replace paths now read unordered;
+  - every matched row was hydrated into a `stored_file` (one extra query per
+    row, millions of matches → millions of queries) just to re-check
+    conditions the SQL already guarantees; the lookup now happens only in
+    "broken/missing only" mode, which genuinely needs to inspect content.
+  Together the analyse pass drops from `2n+1` queries plus a full sort to a
+  single streaming query (plus batched inserts).
+
 ## [0.7.0-beta] — 2026-07-09
 
 Build `2026070901`.
@@ -193,6 +212,7 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.7.1-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.7.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.6.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.5.1-beta]: https://github.com/verzog/moodle-tool_imageextractor
