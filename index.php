@@ -46,7 +46,9 @@ $buttons = $OUTPUT->single_button(
     get_string('newjob', 'tool_imageextractor'),
     'get'
 );
-if (manager::is_replace_allowed()) {
+// Replace jobs are restricted to site administrators (edit.php enforces the
+// same rule), so only offer the entry point where it can actually be used.
+if (manager::is_replace_allowed() && is_siteadmin()) {
     $buttons .= ' ' . $OUTPUT->single_button(
         new moodle_url('/admin/tool/imageextractor/edit.php', ['type' => 'replace']),
         get_string('newreplacejob', 'tool_imageextractor'),

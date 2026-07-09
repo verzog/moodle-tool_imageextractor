@@ -318,20 +318,26 @@ class matcher {
     /**
      * Stream the matched file rows.
      *
-     * Rows are ordered by content hash then id so the caller can collapse
-     * duplicates (when dedupe is on) by skipping repeats of a hash.
+     * When $ordered, rows are sorted by content hash then id so the caller can
+     * collapse duplicates (extract's dedupe) by skipping repeats of a hash.
+     * That sort forces the database to materialise and order the ENTIRE
+     * matched set before the first row is returned - a heavy, disk-spilling
+     * operation on large sites - so callers that do not need it (the replace
+     * paths) must pass false to stream rows as the database finds them.
      *
+     * @param bool $ordered Sort by content hash for duplicate collapsing.
      * @return \moodle_recordset
      */
-    public function get_recordset(): \moodle_recordset {
+    public function get_recordset(bool $ordered = true): \moodle_recordset {
         global $DB;
         [$where, $params] = $this->get_where();
+        $orderby = $ordered ? ' ORDER BY f.contenthash, f.id' : '';
         $sql = "SELECT f.id, f.contenthash, f.filename, f.filepath, f.filesize, f.mimetype,
                        f.contextid, f.component, f.filearea, f.itemid, f.userid,
                        f.timecreated, f.author, f.license
                   FROM {files} f
                  WHERE $where
-              ORDER BY f.contenthash, f.id";
+{$orderby}";
         return $DB->get_recordset_sql($sql, $params);
     }
 }
