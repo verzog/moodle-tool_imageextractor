@@ -6,6 +6,36 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.8.0-beta] — 2026-07-09
+
+Build `2026070903`.
+
+### Fixed
+- **Timeout when re-running or clearing a large replace job.** Clearing a
+  job's results looped over every analysed item (one query each) to remove
+  backups — with millions of stale item rows, pressing Run or "Clear results"
+  stalled past the gateway limit. Backups are now removed in one set-based
+  pass whose cost scales with the backup files that actually exist.
+
+### Changed
+- **A CSV match list now nominates exact files.** When "Select files using"
+  is a match list, the criteria fields (courses, categories, MIME types,
+  component, pattern, sizes, dates and "Images only") are hidden and ignored
+  on save, so a stale filter can never silently exclude a nominated file.
+  Scope and per-row CSVs still combine with the criteria as before.
+- The file-selection choice now leads the criteria section (the separate
+  "CSV upload" section is gone), and choosing any CSV mode requires an
+  uploaded CSV.
+- The live/manual estimate hides (and stops querying) while a match list is
+  selected — it reflects only the criteria fields.
+
+### Added
+- **Progress on the jobs overview**: a progress bar with counts and percent
+  per job (matching the job page, which gains the same bar), and an
+  "Analysing…" indicator while a replace job's background analysis runs.
+- Unit coverage for match-list nomination ignoring criteria; Behat coverage
+  for the match-list selection hiding the criteria fields.
+
 ## [0.7.1-beta] — 2026-07-09
 
 Build `2026070902`.
@@ -212,6 +242,7 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.8.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.7.1-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.7.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.6.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
