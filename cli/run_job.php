@@ -125,11 +125,21 @@ if ($isreplace && !manager::is_replace_allowed()) {
 // Dry run: report what would happen without queuing or changing anything.
 if (empty($options['execute'])) {
     if ($isreplace) {
-        $preview = (new replacer($job))->preview();
-        cli_writeln("Replace job #{$jobid} \"{$job->name}\" (dry run):");
-        cli_writeln("  matched by criteria: {$preview['total']}");
-        cli_writeln("  of the first {$preview['scanned']} checked: "
-            . "{$preview['willreplace']} would be replaced, {$preview['willskip']} skipped (no replacement)");
+        if ($job->status === manager::STATUS_REVIEW) {
+            // Already analysed (via the web Run button): report the exact
+            // stored breakdown instead of re-scanning the file table.
+            $review = manager::review_summary($jobid);
+            cli_writeln("Replace job #{$jobid} \"{$job->name}\" (analysed, awaiting review):");
+            cli_writeln("  matched by criteria: {$review['total']}");
+            cli_writeln("  {$review['willreplace']} will be replaced, "
+                . "{$review['willskip']} skipped (no replacement)");
+        } else {
+            $preview = (new replacer($job))->preview();
+            cli_writeln("Replace job #{$jobid} \"{$job->name}\" (dry run):");
+            cli_writeln("  matched by criteria: {$preview['total']}");
+            cli_writeln("  of the first {$preview['scanned']} checked: "
+                . "{$preview['willreplace']} would be replaced, {$preview['willskip']} skipped (no replacement)");
+        }
         cli_writeln("Re-run with --execute --confirm to apply (this overwrites live files).");
     } else {
         $estimate = manager::estimate($job);

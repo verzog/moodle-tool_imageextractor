@@ -6,7 +6,7 @@ and either **exporting** them (with metadata and naming rules) or
 sets (50 GB or more) by doing all heavy work in throttled, resumable background
 tasks.
 
-**Status:** beta (release `0.5.1-beta`). Feature-complete and CI-tested; suitable
+**Status:** beta (release `0.6.0-beta`). Feature-complete and CI-tested; suitable
 for testing on non-production sites. See [`CHANGELOG.md`](CHANGELOG.md) for the
 release history.
 
@@ -82,9 +82,14 @@ page reload. Either way the estimate reflects the criteria fields only and
 ignores CSV refinement. Background tasks run on cron, so ensure cron is configured.
 Download the generated ZIP volumes and manifest from the job's view page.
 
-Running a replace job from the web shows a warning, a preview of the files that
-would be overwritten, and an "are you sure" confirmation; it is restricted to
-site administrators.
+Running a replace job from the web happens in two phases, and is restricted to
+site administrators. Run first queues a background **analyse** pass that
+matches the targets and resolves their replacements without changing anything
+(so even huge sites cannot time out the page). The job then shows **Awaiting
+review**: the job page presents an exact preview — how many files will be
+replaced or skipped, with a sample — and a final "are you sure" confirmation.
+Only confirming that review queues the destructive apply phase; "Clear
+results" discards the analysis instead.
 
 ### Command line
 

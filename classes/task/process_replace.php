@@ -97,11 +97,34 @@ class process_replace extends \core\task\adhoc_task {
                 return;
             }
 
-            if ($job->status === manager::STATUS_QUEUED) {
-                mtrace('tool_imageextractor: preparing replace job ' . $jobid . ' ("' . $job->name . '")');
+            if ($op === 'analyse') {
+                // Analyse phase: match the targets and resolve replacements in
+                // the background, then park the job for admin review. Nothing
+                // is replaced until the review is confirmed (op=apply).
+                mtrace('tool_imageextractor: analysing replace job ' . $jobid . ' ("' . $job->name . '")');
                 $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_PROCESSING, ['id' => $jobid]);
                 $DB->set_field('tool_imageextractor_job', 'timestarted', time(), ['id' => $jobid]);
+                // Idempotency: a retried analyse (e.g. after an interrupted
+                // run) must not duplicate targets from the partial attempt.
+                $DB->delete_records('tool_imageextractor_item', ['jobid' => $jobid]);
                 $replacer->prepare();
+                $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_REVIEW, ['id' => $jobid]);
+                $matched = $DB->get_field('tool_imageextractor_job', 'totalmatched', ['id' => $jobid]);
+                mtrace('tool_imageextractor: replace job ' . $jobid . ' analysed, ' .
+                    $matched . ' targets matched; awaiting review');
+                return;
+            }
+
+            if ($job->status === manager::STATUS_QUEUED) {
+                $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_PROCESSING, ['id' => $jobid]);
+                $DB->set_field('tool_imageextractor_job', 'timestarted', time(), ['id' => $jobid]);
+                // A reviewed job already has its targets prepared by the
+                // analyse phase; only prepare here when applying directly
+                // (e.g. from the CLI) so targets are never duplicated.
+                if (!$DB->record_exists('tool_imageextractor_item', ['jobid' => $jobid])) {
+                    mtrace('tool_imageextractor: preparing replace job ' . $jobid . ' ("' . $job->name . '")');
+                    $replacer->prepare();
+                }
             }
 
             $remaining = $replacer->apply_batch(self::BATCH_SIZE);
