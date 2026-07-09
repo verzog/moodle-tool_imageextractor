@@ -6,6 +6,26 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.10.0-beta] — 2026-07-09
+
+Build `2026070905`.
+
+### Fixed
+- **A running job could overload the database and make the whole site
+  unresponsive.** Re-queued background batches ran back-to-back within a single
+  cron run, so a large replace/extract job hammered the database continuously
+  (one or more `mdl_files` queries per file). On a small or shared server that
+  saturated the database and every page — including saving a job — stalled
+  behind it. Background tasks are now **throttled**: each batch processes a
+  bounded number of files, then re-queues the next batch a short time in the
+  future so the database is left idle between bursts and ordinary requests stay
+  responsive. Large jobs take longer but no longer take the site down.
+
+### Added
+- Two settings to tune the throttle for your hardware: **Batch size** (files
+  per batch, default 50) and **Throttle delay** (seconds between batches,
+  default 20; set to 0 to process as fast as possible). Unit coverage for both.
+
 ## [0.9.0-beta] — 2026-07-09
 
 Build `2026070904`.
@@ -269,6 +289,7 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.10.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.9.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.8.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.7.1-beta]: https://github.com/verzog/moodle-tool_imageextractor

@@ -318,9 +318,15 @@ class process_job extends \core\task\adhoc_task {
             ['jobid' => $job->id, 'status' => 'pending']
         );
         if ($remaining > 0) {
-            // More to do: re-queue ourselves for the next volume.
+            // More to do: re-queue ourselves for the next volume. Pace it into
+            // the future so the database rests between volumes instead of one
+            // cron run packing volume after volume and starving the site.
             $task = new process_job();
             $task->set_custom_data(['jobid' => (int) $job->id]);
+            $delay = manager::throttle_delay();
+            if ($delay > 0) {
+                $task->set_next_run_time(time() + $delay);
+            }
             \core\task\manager::queue_adhoc_task($task);
             mtrace('tool_imageextractor: job ' . $job->id . ' has ' . $remaining . ' files left, re-queued');
         } else {

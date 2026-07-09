@@ -78,6 +78,37 @@ class manager {
     }
 
     /**
+     * How many files a background task processes per batch before re-queuing.
+     * Keeping each batch small bounds the burst of database work so a running
+     * job cannot saturate a shared database.
+     *
+     * @return int At least 1.
+     */
+    public static function batch_size(): int {
+        $configured = (int) get_config('tool_imageextractor', 'batch_size');
+        return $configured > 0 ? $configured : 50;
+    }
+
+    /**
+     * Seconds to leave the database idle between batches. Re-queuing the next
+     * batch this far in the future (instead of looping straight on) gives
+     * ordinary page requests room to run while a large job processes. A value
+     * of 0 means process batches back-to-back.
+     *
+     * @return int Zero or more.
+     */
+    public static function throttle_delay(): int {
+        // Distinguish "never configured" (apply the gentle default) from an
+        // explicit 0 (admin opted out of throttling), since get_config returns
+        // false only for the former.
+        $configured = get_config('tool_imageextractor', 'throttle_delay');
+        if ($configured === false || $configured === '') {
+            return 20;
+        }
+        return max(0, (int) $configured);
+    }
+
+    /**
      * A blank criteria set with sensible defaults.
      *
      * @return array

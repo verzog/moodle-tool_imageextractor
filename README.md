@@ -6,7 +6,7 @@ and either **exporting** them (with metadata and naming rules) or
 sets (50 GB or more) by doing all heavy work in throttled, resumable background
 tasks.
 
-**Status:** beta (release `0.9.0-beta`). Feature-complete and CI-tested; suitable
+**Status:** beta (release `0.10.0-beta`). Feature-complete and CI-tested; suitable
 for testing on non-production sites. See [`CHANGELOG.md`](CHANGELOG.md) for the
 release history.
 
@@ -128,6 +128,13 @@ _Site administration > Plugins > Admin tools > Image extractor > Settings_:
 - **Allow replace/restore** — opt-in for the destructive replace feature.
 - **Default volume size (MB)** — default ZIP volume cap.
 - **Processing / Replace concurrency** — how many background tasks run at once.
+- **Batch size** — how many files each background batch processes before
+  re-queuing (default 50). Smaller batches keep each burst of database work
+  short.
+- **Throttle delay (seconds)** — how long to leave the database idle between
+  batches (default 20; 0 = process as fast as possible). On a small or shared
+  server this keeps a running job from saturating the database and slowing the
+  rest of the site; a large job simply takes longer.
 - **Retention period (days)** — auto-cleanup window for completed jobs.
 
 ## Privacy

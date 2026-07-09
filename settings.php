@@ -93,6 +93,29 @@ if ($hassiteconfig) {
         PARAM_INT
     ));
 
+    // How many files each background batch processes before the task re-queues
+    // itself. A smaller batch keeps each burst of database work short so a
+    // running job cannot monopolise a shared database on a small server.
+    $settings->add(new admin_setting_configtext(
+        'tool_imageextractor/batch_size',
+        get_string('setting_batch_size', 'tool_imageextractor'),
+        get_string('setting_batch_size_desc', 'tool_imageextractor'),
+        50,
+        PARAM_INT
+    ));
+
+    // Seconds to wait between batches. Re-queuing the next batch a little in
+    // the future (rather than looping straight on) leaves the database idle
+    // between bursts so ordinary page requests stay responsive while a large
+    // job runs. Zero processes batches back-to-back (fastest, heaviest).
+    $settings->add(new admin_setting_configtext(
+        'tool_imageextractor/throttle_delay',
+        get_string('setting_throttle_delay', 'tool_imageextractor'),
+        get_string('setting_throttle_delay_desc', 'tool_imageextractor'),
+        20,
+        PARAM_INT
+    ));
+
     // How many days completed jobs and their generated archives are kept
     // before the cleanup scheduled task removes them. Zero disables
     // automatic cleanup.
