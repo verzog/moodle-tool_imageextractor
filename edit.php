@@ -25,7 +25,6 @@ require_once($CFG->libdir . '/adminlib.php');
 use tool_imageextractor\manager;
 use tool_imageextractor\matcher;
 use tool_imageextractor\form\job_form;
-use tool_imageextractor\form\replace_form;
 use tool_imageextractor\form\criteria_fields;
 
 $id = optional_param('id', 0, PARAM_INT);
@@ -55,27 +54,34 @@ $PAGE->set_url($editurl);
 $PAGE->set_title(get_string('editjob', 'tool_imageextractor'));
 $PAGE->set_heading(get_string('editjob', 'tool_imageextractor'));
 
-if ($isreplace) {
-    // Tell the form which replacement mode (if any) already has a stored source,
-    // so it can require a fresh upload when the mode is changed on edit.
-    $storedsource = false;
-    if ($job) {
-        $storedsource = (bool) get_file_storage()->get_area_files(
-            $context->id,
-            manager::COMPONENT,
-            'replacement',
-            $job->id,
-            'id',
-            false
-        );
-    }
-    $mform = new replace_form($editurl->out(false), [
-        'storedreplacemode' => $job ? $job->replacemode : '',
-        'hasstoredsource'   => $storedsource,
-    ]);
-} else {
-    $mform = new job_form($editurl->out(false));
+// Replace jobs upload live content, so offering that type is restricted to
+// site administrators with the feature switched on.
+$allowreplace = manager::is_replace_allowed() && is_siteadmin();
+if ($isreplace && !$allowreplace) {
+    throw new moodle_exception('replaceadminonly', 'tool_imageextractor');
 }
+
+// Tell the form which replacement mode (if any) already has a stored source,
+// so it can require a fresh upload when the mode is changed on edit.
+$storedsource = false;
+if ($job && $isreplace) {
+    $storedsource = (bool) get_file_storage()->get_area_files(
+        $context->id,
+        manager::COMPONENT,
+        'replacement',
+        $job->id,
+        'id',
+        false
+    );
+}
+
+$mform = new job_form($editurl->out(false), [
+    'id'                => $id,
+    'jobtype'           => $type,
+    'allowreplace'      => $allowreplace,
+    'storedreplacemode' => $job ? ($job->replacemode ?? '') : '',
+    'hasstoredsource'   => $storedsource,
+]);
 
 if ($mform->is_cancelled()) {
     redirect($job ? new moodle_url('/admin/tool/imageextractor/view.php', ['id' => $id]) : $indexurl);
@@ -125,6 +131,11 @@ if ($job) {
 }
 
 if ($data = $mform->get_data()) {
+    // The form only offers the replace type to permitted admins, but the
+    // submitted value must be held to the same rule.
+    if (($data->jobtype ?? 'extract') === 'replace' && !$allowreplace) {
+        throw new moodle_exception('replaceadminonly', 'tool_imageextractor');
+    }
     $result = manager::save_job($data);
     foreach ($result['warnings'] as $warning) {
         \core\notification::warning($warning);
@@ -133,13 +144,13 @@ if ($data = $mform->get_data()) {
     redirect(new moodle_url('/admin/tool/imageextractor/view.php', ['id' => $result['id']]));
 }
 
-// The "Estimate" button reloads the form without saving; compute a rough match
-// count from the entered criteria (ignoring any CSV refinement) to show above
-// the form. Only the extract form carries this button.
-if (!$isreplace) {
-    // Enhance the extract form with a live match-count estimate.
-    $PAGE->requires->js_call_amd('tool_imageextractor/estimate', 'init');
-}
+// Enhance the form with a live match-count estimate. The estimate region is
+// extract-only; when the type selector is switched to replace the region is
+// hidden by the form's hideIf rules and the module's updates are unseen.
+$PAGE->requires->js_call_amd('tool_imageextractor/estimate', 'init');
+// Show only the sections relevant to the selected job type (the individual
+// fields are covered by hideIf; this hides the section headers too).
+$PAGE->requires->js_call_amd('tool_imageextractor/jobtype', 'init');
 
 $estimate = null;
 if (!$isreplace && $mform->no_submit_button_pressed()) {
