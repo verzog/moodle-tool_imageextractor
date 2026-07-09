@@ -6,7 +6,7 @@ and either **exporting** them (with metadata and naming rules) or
 sets (50 GB or more) by doing all heavy work in throttled, resumable background
 tasks.
 
-**Status:** beta (release `0.6.0-beta`). Feature-complete and CI-tested; suitable
+**Status:** beta (release `0.7.0-beta`). Feature-complete and CI-tested; suitable
 for testing on non-production sites. See [`CHANGELOG.md`](CHANGELOG.md) for the
 release history.
 
@@ -74,7 +74,10 @@ complete the installation.
 ## Usage
 
 Go to _Site administration > Plugins > Admin tools > Image extractor_. Create a
-job, review the estimated match count, then run it. While editing an extract
+job — one form covers both job types, with a selector at the top for
+**Extract** (download images as ZIP archives) or **Replace** (upload
+replacement content); only the sections relevant to the chosen type are
+shown. Review the estimated match count, then run it. While editing an extract
 job, a **live estimate** of the approximate match count and total size updates
 as you change the criteria (course, category, MIME type, size, and so on); if
 JavaScript is unavailable, press **Estimate matches** for the same figure via a

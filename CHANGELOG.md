@@ -6,6 +6,31 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.7.0-beta] — 2026-07-09
+
+Build `2026070901`.
+
+### Changed
+- **One job form that adapts to the job type.** The separate extract and
+  replace forms are merged into a single form with a type selector at the top
+  — *Extract (download images as ZIP archives)* or *Replace (upload
+  replacement content)*. Only the sections relevant to the chosen type are
+  shown: the output/naming/volume section and match estimate for extract, the
+  replacement-source and backup section (and "broken/missing only" filter)
+  for replace. Section visibility switches live as the type is changed (a new
+  `tool_imageextractor/jobtype` AMD module hides whole sections; per-field
+  `hideIf` rules back it up). A job's type is fixed once saved.
+- The replace type is offered only to site administrators with
+  "Allow replace/restore" enabled, and the same rule is enforced server-side
+  on save (previously creating — though not running — a replace job was
+  possible for any user with the manage capability).
+- Per-row criteria CSVs are now rejected for replace jobs with a clear
+  validation message (previously the option simply wasn't listed).
+- `replace_form.php` removed; `job_form` handles both types.
+
+### Added
+- Behat coverage for the type selector showing/hiding the relevant sections.
+
 ## [0.6.0-beta] — 2026-07-09
 
 Build `2026070900`.
@@ -168,6 +193,7 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.7.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.6.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.5.1-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.5.0-beta]: https://github.com/verzog/moodle-tool_imageextractor

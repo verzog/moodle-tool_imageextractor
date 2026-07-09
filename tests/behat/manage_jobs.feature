@@ -22,6 +22,23 @@ Feature: Create and scope image extraction jobs
     And I should see "Extract"
 
   @javascript
+  Scenario: Only the sections relevant to the chosen job type are shown
+    Given the following config values are set as admin:
+      | allow_replace | 1 | tool_imageextractor |
+    When I visit "/admin/tool/imageextractor/index.php"
+    And I press "New extraction job"
+    And I expand all fieldsets
+    Then I should see "Naming rule"
+    And I should see "Live estimate"
+    And I should not see "Back up originals"
+    And I should not see "Only broken or missing files"
+    When I set the field "Type" to "Replace - upload replacement content over matching images"
+    Then I should see "Back up originals"
+    And I should see "Only broken or missing files"
+    And I should not see "Naming rule"
+    And I should not see "Live estimate"
+
+  @javascript
   Scenario: The live estimate updates and a job can be scoped to a category
     Given the following "categories" exist:
       | name    | category | idnumber |
