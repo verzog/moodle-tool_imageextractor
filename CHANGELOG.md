@@ -23,8 +23,11 @@ Build `2026070904`.
     still applies its already-prepared targets without clearing them.)
   - **Clear results** and **editing a job** hand a large result set to a new
     background `reset_job` task; the job shows a **Clearing** state until it
-    returns to draft. A job with nothing heavy to remove is still cleared
-    inline.
+    returns to draft. The bounded, downloadable outputs (ZIP volumes, manifest
+    and counters) are still removed *synchronously* so the job page stops
+    serving the previous run's downloads the instant it is cleared or edited —
+    only the heavy item-row and per-item backup delete is deferred. A job with
+    nothing heavy to remove is still cleared inline.
 
 ### Added
 - A **Clearing** job state (shown on the overview and job page) for the window

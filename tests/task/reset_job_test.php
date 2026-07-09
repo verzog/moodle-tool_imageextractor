@@ -93,8 +93,47 @@ final class reset_job_test extends \advanced_testcase {
     }
 
     /**
+     * Record a generated ZIP volume (row plus file) and a manifest for a job,
+     * as a completed extract run would leave behind.
+     *
+     * @param int $jobid
+     * @return void
+     */
+    protected function make_outputs(int $jobid): void {
+        global $DB;
+        $DB->insert_record('tool_imageextractor_volume', (object) [
+            'jobid'       => $jobid,
+            'sequence'    => 1,
+            'filename'    => 'images-volume-001.zip',
+            'filesize'    => 3,
+            'filecount'   => 1,
+            'timecreated' => time(),
+        ]);
+        $fs = get_file_storage();
+        $context = \context_system::instance();
+        $fs->create_file_from_string([
+            'contextid' => $context->id,
+            'component' => manager::COMPONENT,
+            'filearea'  => 'volumes',
+            'itemid'    => $jobid,
+            'filepath'  => '/',
+            'filename'  => 'images-volume-001.zip',
+        ], 'zip');
+        $fs->create_file_from_string([
+            'contextid' => $context->id,
+            'component' => manager::COMPONENT,
+            'filearea'  => 'manifest',
+            'itemid'    => $jobid,
+            'filepath'  => '/',
+            'filename'  => 'manifest.csv',
+        ], 'name');
+    }
+
+    /**
      * A job with prepared items defers its clear to a background task and parks
-     * in the "clearing" state, so the web request never runs the big delete.
+     * in the "clearing" state, so the web request never runs the big delete -
+     * but its downloadable outputs (volumes, manifest, counters) are removed
+     * synchronously so the job page stops serving the old run at once.
      */
     public function test_reset_results_defers_when_items_exist(): void {
         global $DB;
@@ -104,6 +143,7 @@ final class reset_job_test extends \advanced_testcase {
 
         $job = $this->make_completed_job(1);
         $this->make_item($job->id);
+        $this->make_outputs($job->id);
 
         $deferred = manager::reset_results($job->id);
 
@@ -112,6 +152,11 @@ final class reset_job_test extends \advanced_testcase {
         $this->assertSame(manager::STATUS_CLEARING, manager::get_job($job->id)->status);
         $this->assertSame(1, $DB->count_records('tool_imageextractor_item', ['jobid' => $job->id]));
         $this->assertCount(1, \core\task\manager::get_adhoc_tasks(reset_job::class));
+        // The downloadable outputs are gone immediately - no stale downloads
+        // while the heavy delete waits for cron.
+        $this->assertCount(0, manager::get_volumes($job->id));
+        $this->assertFalse(manager::has_manifest($job->id));
+        $this->assertSame(0, (int) manager::get_job($job->id)->totalmatched);
 
         $this->runAdhocTasks(reset_job::class);
 

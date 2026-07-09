@@ -486,6 +486,11 @@ class manager {
         global $DB;
 
         if ($DB->record_exists('tool_imageextractor_item', ['jobid' => $jobid])) {
+            // Remove the bounded outputs (volumes, manifest, counters) now so
+            // the job page stops advertising and serving the previous run's
+            // downloads the instant it is cleared or edited; defer only the
+            // heavy item-row and per-item backup delete to the task.
+            self::clear_outputs($jobid);
             $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_CLEARING, ['id' => $jobid]);
             $DB->set_field('tool_imageextractor_job', 'error', null, ['id' => $jobid]);
             $task = new task\reset_job();
@@ -615,6 +620,29 @@ class manager {
         );
 
         $DB->delete_records('tool_imageextractor_item', ['jobid' => $jobid]);
+
+        // Remove the bounded, user-visible outputs too.
+        self::clear_outputs($jobid);
+    }
+
+    /**
+     * Remove a job's generated outputs - the ZIP volumes, their rows, the
+     * manifest - and zero its counters, without touching the (potentially huge)
+     * item rows or per-item backups. These artifacts are few and bounded (one
+     * manifest and a handful of volume files), so this is always cheap enough to
+     * run in a web request; it is what the job page advertises for download, so
+     * clearing it synchronously stops stale downloads being served the moment a
+     * job is cleared or edited, even while the heavy item/backup delete is still
+     * deferred to cron.
+     *
+     * @param int $jobid
+     * @return void
+     */
+    public static function clear_outputs(int $jobid): void {
+        global $DB;
+        $fs = get_file_storage();
+        $context = self::context();
+
         // Volumes are stored under the job id as their file-area item id.
         $fs->delete_area_files($context->id, self::COMPONENT, 'volumes', $jobid);
         $DB->delete_records('tool_imageextractor_volume', ['jobid' => $jobid]);
