@@ -210,8 +210,9 @@ class manager {
             if ($content !== null) {
                 $rows = csv_importer::parse_rows($content);
                 $result = csv_importer::to_criteria($rows, $csvmode);
-                if ($csvmode === 'match'
-                        && (!empty($result['criteria']['filenames']) || !empty($result['criteria']['contenthashes']))) {
+                $nominated = !empty($result['criteria']['filenames'])
+                    || !empty($result['criteria']['contenthashes']);
+                if ($csvmode === 'match' && $nominated) {
                     // A match list nominates exact files: the criteria fields
                     // are hidden on the form and ignored here, so a stale
                     // course or MIME filter can never silently exclude a
