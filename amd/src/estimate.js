@@ -128,6 +128,14 @@ const update = (form, region, state) => {
     state.seq += 1;
     const seq = state.seq;
 
+    // The estimate is extract-only. While the replace type is selected the
+    // region is hidden, so asking the server would run an expensive all-files
+    // count for a value nobody can see - skip until the type switches back.
+    const jobtype = form.elements.jobtype;
+    if (jobtype && jobtype.value === 'replace') {
+        return Promise.resolve();
+    }
+
     render(region, state, seq, 'estimatelivecomputing', null);
 
     return Ajax.call([{
