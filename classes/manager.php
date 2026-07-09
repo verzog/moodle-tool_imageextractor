@@ -537,11 +537,17 @@ class manager {
         $fs = get_file_storage();
         $context = self::context();
 
-        // Replace jobs keep a per-item backup of the original; remove those too.
-        $itemids = $DB->get_fieldset_select('tool_imageextractor_item', 'id', 'jobid = :jobid', ['jobid' => $jobid]);
-        foreach ($itemids as $itemid) {
-            $fs->delete_area_files($context->id, self::COMPONENT, 'backup', (int) $itemid);
-        }
+        // Replace jobs keep a per-item backup of the original; remove those in
+        // one set-based pass. A job can hold millions of item rows, so looping
+        // over ids (one query each) stalls the web request - this call's cost
+        // scales with the backup files that actually exist instead.
+        $fs->delete_area_files_select(
+            $context->id,
+            self::COMPONENT,
+            'backup',
+            'IN (SELECT id FROM {tool_imageextractor_item} WHERE jobid = :jobid)',
+            ['jobid' => $jobid]
+        );
 
         $DB->delete_records('tool_imageextractor_item', ['jobid' => $jobid]);
         // Volumes are stored under the job id as their file-area item id.
