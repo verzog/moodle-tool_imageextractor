@@ -217,6 +217,13 @@ class process_job extends \core\task\adhoc_task {
         $doneids = [];
         $failedids = [];
         $volumebytes = 0;
+        // Bound this run by file count as well as volume size. Each file costs
+        // a get_file_by_id (a mdl_files query), so with a large volume size one
+        // run could otherwise fetch millions of files before the throttle delay
+        // ever applies - exactly the database saturation the throttle prevents.
+        // Capping the volume here means a volume holds at most batch_size files
+        // and spills into the next (paced) run.
+        $batchsize = manager::batch_size();
 
         $rs = $DB->get_recordset(
             'tool_imageextractor_item',
@@ -224,6 +231,12 @@ class process_job extends \core\task\adhoc_task {
             'id ASC'
         );
         foreach ($rs as $item) {
+            // Stop once this run has examined a full batch (counting files that
+            // failed the check below - each still cost one query).
+            if (count($doneids) + count($failedids) >= $batchsize) {
+                break;
+            }
+
             $stored = $fs->get_file_by_id((int) $item->fileid);
             // Skip files that have vanished or whose content is missing on disk -
             // the ZIP packer would otherwise silently drop them and the manifest
@@ -240,7 +253,7 @@ class process_job extends \core\task\adhoc_task {
             $doneids[] = (int) $item->id;
             $volumebytes += (int) $item->filesize;
 
-            // One file per volume minimum, then stop once the cap is reached.
+            // One file per volume minimum, then stop once the size cap is reached.
             if ($volumebytes >= (int) $job->volumesize) {
                 break;
             }

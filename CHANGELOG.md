@@ -21,10 +21,16 @@ Build `2026070905`.
   future so the database is left idle between bursts and ordinary requests stay
   responsive. Large jobs take longer but no longer take the site down.
 
+  Extract jobs are capped by batch size too: each run packs at most one
+  batch of files into a volume (so a volume holds at most that many files and
+  spills into the next paced run), rather than fetching enough files to fill a
+  multi-gigabyte volume in a single burst.
+
 ### Added
 - Two settings to tune the throttle for your hardware: **Batch size** (files
-  per batch, default 50) and **Throttle delay** (seconds between batches,
-  default 20; set to 0 to process as fast as possible). Unit coverage for both.
+  per batch — and, for extract jobs, the maximum files per ZIP volume; default
+  50) and **Throttle delay** (seconds between batches, default 20; set to 0 to
+  process as fast as possible). Unit coverage for both.
 
 ## [0.9.0-beta] — 2026-07-09
 
