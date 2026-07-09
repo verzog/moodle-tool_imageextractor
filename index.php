@@ -21,6 +21,7 @@
 
 require(__DIR__ . '/../../../config.php');
 require_once($CFG->libdir . '/adminlib.php');
+require_once(__DIR__ . '/lib.php');
 
 use tool_imageextractor\manager;
 
@@ -79,9 +80,12 @@ $table->attributes['class'] = 'generaltable';
 foreach ($jobs as $job) {
     $statuslabel = get_string('jobstatus_' . $job->status, 'tool_imageextractor');
 
-    $progress = '-';
-    if ((int) $job->totalmatched > 0) {
-        $progress = $job->processedcount . ' / ' . $job->totalmatched;
+    $isrunning = in_array($job->status, [manager::STATUS_QUEUED, manager::STATUS_PROCESSING], true);
+    if ($job->jobtype === 'replace' && $isrunning && (int) $job->totalmatched === 0) {
+        // The analyse phase has no totals until it finishes.
+        $progress = get_string('analysing', 'tool_imageextractor');
+    } else {
+        $progress = tool_imageextractor_progress_bar((int) $job->processedcount, (int) $job->totalmatched);
     }
 
     $viewurl = new moodle_url('/admin/tool/imageextractor/view.php', ['id' => $job->id]);

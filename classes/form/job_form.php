@@ -97,37 +97,11 @@ class job_form extends \moodleform {
 
         // Criteria (shared: both types select files the same way).
         $mform->addElement('header', 'criteriaheader', get_string('criteria', 'tool_imageextractor'));
-        criteria_fields::add($mform);
-
-        // Replace-only refinement of the criteria.
-        $mform->addElement(
-            'advcheckbox',
-            'missingonly',
-            get_string('missingonly', 'tool_imageextractor'),
-            get_string('missingonly_help', 'tool_imageextractor')
-        );
-        $mform->hideIf('missingonly', 'jobtype', 'eq', 'extract');
-
-        // Match estimate (extract-only), kept inside the expanded criteria
-        // section so the live figure is visible without opening a collapsed
-        // fieldset. The no-submit button recomputes server-side without
-        // saving; the inline region is updated live by the estimate AMD module
-        // and falls back to the button when JavaScript is unavailable.
-        $mform->addElement('submit', 'estimatematches', get_string('estimatematches', 'tool_imageextractor'));
-        $mform->registerNoSubmitButton('estimatematches');
-        $mform->hideIf('estimatematches', 'jobtype', 'eq', 'replace');
-        $mform->addElement(
-            'static',
-            'estimatelive',
-            get_string('estimatelive', 'tool_imageextractor'),
-            \html_writer::span('—', 'tool_imageextractor-estimate', ['data-region' => 'tool_imageextractor-estimate'])
-        );
-        $mform->addHelpButton('estimatelive', 'estimatelive', 'tool_imageextractor');
-        $mform->hideIf('estimatelive', 'jobtype', 'eq', 'replace');
-
-        // CSV (shared).
-        $mform->addElement('header', 'csvheader', get_string('csvupload', 'tool_imageextractor'));
-
+        // How the files are chosen comes first: by the criteria fields below,
+        // or driven by an uploaded CSV. A match-list CSV nominates exact files,
+        // so choosing it hides (and the save ignores) the criteria fields -
+        // a stale course or MIME filter must never silently exclude a
+        // nominated file.
         $modes = [
             'none'     => get_string('csvmode_none', 'tool_imageextractor'),
             'scope'    => get_string('csvmode_scope', 'tool_imageextractor'),
@@ -146,6 +120,40 @@ class job_form extends \moodleform {
             ['accepted_types' => ['.csv', '.txt'], 'maxfiles' => 1]
         );
         $mform->hideIf('csvfile', 'csvmode', 'eq', 'none');
+
+        criteria_fields::add($mform);
+
+        // Replace-only refinement of the criteria. Unlike the criteria fields
+        // this stays available for match lists: replacing only the broken ones
+        // of the nominated files is a legitimate combination.
+        $mform->addElement(
+            'advcheckbox',
+            'missingonly',
+            get_string('missingonly', 'tool_imageextractor'),
+            get_string('missingonly_help', 'tool_imageextractor')
+        );
+        $mform->hideIf('missingonly', 'jobtype', 'eq', 'extract');
+
+        // Match estimate (extract-only), kept inside the expanded criteria
+        // section so the live figure is visible without opening a collapsed
+        // fieldset. The no-submit button recomputes server-side without
+        // saving; the inline region is updated live by the estimate AMD module
+        // and falls back to the button when JavaScript is unavailable. The
+        // estimate reflects only the criteria fields, so it is hidden for
+        // match lists too - it could not describe the nominated files.
+        $mform->addElement('submit', 'estimatematches', get_string('estimatematches', 'tool_imageextractor'));
+        $mform->registerNoSubmitButton('estimatematches');
+        $mform->hideIf('estimatematches', 'jobtype', 'eq', 'replace');
+        $mform->hideIf('estimatematches', 'csvmode', 'eq', 'match');
+        $mform->addElement(
+            'static',
+            'estimatelive',
+            get_string('estimatelive', 'tool_imageextractor'),
+            \html_writer::span('—', 'tool_imageextractor-estimate', ['data-region' => 'tool_imageextractor-estimate'])
+        );
+        $mform->addHelpButton('estimatelive', 'estimatelive', 'tool_imageextractor');
+        $mform->hideIf('estimatelive', 'jobtype', 'eq', 'replace');
+        $mform->hideIf('estimatelive', 'csvmode', 'eq', 'match');
 
         // Output (extract-only): how the downloaded archives are produced.
         $mform->addElement('header', 'outputheader', get_string('output', 'tool_imageextractor'));
@@ -245,6 +253,13 @@ class job_form extends \moodleform {
     public function validation($data, $files) {
         $errors = parent::validation($data, $files);
         $errors += criteria_fields::validate($data);
+
+        // Every CSV-driven mode needs a CSV; without one a match-mode job
+        // would have nothing nominating its files. When editing, the stored
+        // CSV is preloaded into the draft area, which satisfies this.
+        if (($data['csvmode'] ?? 'none') !== 'none' && !$this->get_new_filename('csvfile')) {
+            $errors['csvfile'] = get_string('errorcsvrequired', 'tool_imageextractor');
+        }
 
         $isreplace = ($data['jobtype'] ?? 'extract') === 'replace';
 

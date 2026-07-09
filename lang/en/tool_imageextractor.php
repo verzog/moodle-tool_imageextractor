@@ -18,8 +18,10 @@
  * @copyright  © Skin Cancer College Australasia
  * @license    Proprietary — Skin Cancer College Australasia, all rights reserved
  */
+
 $string['actions'] = 'Actions';
 $string['analysequeued'] = 'Analysis queued. Matching files are being identified in the background; reload this page to review the results once it finishes.';
+$string['analysing'] = 'Analysing…';
 $string['analysinghint'] = 'Analysing matching files in the background. Nothing is replaced during this phase; reload this page to check progress.';
 $string['backtojobs'] = 'Back to jobs';
 $string['backup'] = 'Back up originals';
@@ -41,16 +43,15 @@ $string['courses'] = 'Courses';
 $string['courses_help'] = 'Limit the search to files that belong to the selected courses, including files in each course\'s activities and blocks. Leave empty to search the whole site. Courses chosen here are combined with any courses listed in an uploaded scope CSV.';
 $string['criteria'] = 'Search criteria';
 $string['csvfile'] = 'CSV file';
-$string['csvmode'] = 'CSV interpretation';
-$string['csvmode_criteria'] = 'Per-row criteria (each row is a search specification)';
-$string['csvmode_help'] = 'Choose how the uploaded CSV is read. Scope limits the search to the listed courses, course categories or users (recognised from a courseid, category, username/email column, or a bare course identifier in the first column). Match pulls the exact filenames or content hashes listed. Per-row criteria treats each row as its own search specification, combined with OR.';
-$string['csvmode_match'] = 'Match list (filenames or content hashes)';
-$string['csvmode_none'] = 'Do not use a CSV';
-$string['csvmode_scope'] = 'Scope list (course, category or user identifiers)';
+$string['csvmode'] = 'Select files using';
+$string['csvmode_criteria'] = 'A CSV of per-row criteria (each row is a search specification)';
+$string['csvmode_help'] = 'Files can be selected by the criteria fields below, or driven by an uploaded CSV. A scope list limits the criteria search to the listed courses, course categories or users (recognised from a courseid, category or username/email column, or a bare course identifier in the first column). A match list selects exactly the listed files - by filename or content hash, wherever they are - and the other criteria are ignored. Per-row criteria treats each row as its own search specification, combined with OR and refined by the criteria fields.';
+$string['csvmode_match'] = 'A CSV match list (exact filenames or content hashes)';
+$string['csvmode_none'] = 'The search criteria below';
+$string['csvmode_scope'] = 'A CSV scope list (course, category or user identifiers)';
 $string['csvunknowncategory'] = 'CSV: could not match a course category for "{$a}" - row skipped.';
 $string['csvunknowncourse'] = 'CSV: could not match a course for "{$a}" - row skipped.';
 $string['csvunknownuser'] = 'CSV: could not match a user for "{$a}" - row skipped.';
-$string['csvupload'] = 'CSV upload';
 $string['datefrom'] = 'Created on or after';
 $string['dateto'] = 'Created on or before';
 $string['dedupe'] = 'Remove duplicates';
@@ -60,6 +61,7 @@ $string['disabledwarning'] = 'The image extractor is currently disabled in the p
 $string['downloads'] = 'Downloads';
 $string['editjob'] = 'Edit job';
 $string['errorcsvcriteriareplace'] = 'Per-row criteria CSVs cannot be used with replace jobs. Use a scope or match list instead.';
+$string['errorcsvrequired'] = 'Upload a CSV file, or select "The search criteria below".';
 $string['errordaterange'] = 'The "created on or before" date must be on or after the "created on or after" date.';
 $string['errornoreplacement'] = 'Please upload a replacement image (or ZIP) for this replace job.';
 $string['errorsizerange'] = 'The maximum size must be greater than or equal to the minimum size.';

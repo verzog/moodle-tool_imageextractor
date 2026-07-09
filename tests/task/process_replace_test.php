@@ -149,6 +149,9 @@ final class process_replace_test extends \advanced_testcase {
     public function test_analyse_review_apply_flow(): void {
         global $DB;
         $this->resetAfterTest();
+        // The task narrates its progress via mtrace; own that output so
+        // PHPUnit does not flag the test as risky.
+        $this->expectOutputRegex('/tool_imageextractor:/');
         $this->enable_plugin();
 
         $target = $this->make_target('OLD');
@@ -197,6 +200,9 @@ final class process_replace_test extends \advanced_testcase {
     public function test_direct_apply_still_prepares(): void {
         global $DB;
         $this->resetAfterTest();
+        // The task narrates its progress via mtrace; own that output so
+        // PHPUnit does not flag the test as risky.
+        $this->expectOutputRegex('/tool_imageextractor:/');
         $this->enable_plugin();
 
         $target = $this->make_target('OLD');
@@ -219,6 +225,9 @@ final class process_replace_test extends \advanced_testcase {
     public function test_discard_analysis(): void {
         global $DB;
         $this->resetAfterTest();
+        // The task narrates its progress via mtrace; own that output so
+        // PHPUnit does not flag the test as risky.
+        $this->expectOutputRegex('/tool_imageextractor:/');
         $this->enable_plugin();
 
         $this->make_target('OLD');

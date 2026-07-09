@@ -21,6 +21,7 @@
 
 require(__DIR__ . '/../../../config.php');
 require_once($CFG->libdir . '/adminlib.php');
+require_once(__DIR__ . '/lib.php');
 
 use tool_imageextractor\manager;
 
@@ -189,8 +190,8 @@ if ((int) $job->totalmatched > 0) {
     $summary->data[] = [get_string('totalmatched', 'tool_imageextractor'),
         $job->totalmatched . ' (' . display_size((int) $job->totalbytes) . ')'];
     $summary->data[] = [get_string('progress', 'tool_imageextractor'),
-        $job->processedcount . ' / ' . $job->totalmatched
-        . ' (' . display_size((int) $job->processedbytes) . ')'];
+        tool_imageextractor_progress_bar((int) $job->processedcount, (int) $job->totalmatched)
+        . html_writer::div(display_size((int) $job->processedbytes), 'small')];
 }
 if ((int) $job->failedcount > 0) {
     $summary->data[] = [get_string('failedcount', 'tool_imageextractor'), $job->failedcount];

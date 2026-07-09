@@ -128,11 +128,13 @@ const update = (form, region, state) => {
     state.seq += 1;
     const seq = state.seq;
 
-    // The estimate is extract-only. While the replace type is selected the
-    // region is hidden, so asking the server would run an expensive all-files
-    // count for a value nobody can see - skip until the type switches back.
+    // The estimate is extract-only and reflects the criteria fields. While
+    // the replace type or a CSV match list is selected, the region is hidden
+    // and the figure would be meaningless - skip the (expensive all-files
+    // count) request entirely until the selection changes back.
     const jobtype = form.elements.jobtype;
-    if (jobtype && jobtype.value === 'replace') {
+    const csvmode = form.elements.csvmode;
+    if ((jobtype && jobtype.value === 'replace') || (csvmode && csvmode.value === 'match')) {
         return Promise.resolve();
     }
 

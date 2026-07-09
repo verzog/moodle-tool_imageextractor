@@ -6,7 +6,7 @@ and either **exporting** them (with metadata and naming rules) or
 sets (50 GB or more) by doing all heavy work in throttled, resumable background
 tasks.
 
-**Status:** beta (release `0.7.1-beta`). Feature-complete and CI-tested; suitable
+**Status:** beta (release `0.8.0-beta`). Feature-complete and CI-tested; suitable
 for testing on non-production sites. See [`CHANGELOG.md`](CHANGELOG.md) for the
 release history.
 
@@ -17,7 +17,8 @@ release history.
   area, MIME type, filename pattern, size range and creation date.
 - Refine or drive the search with an uploaded **CSV**, interpreted as either:
   - a **scope list** of course, course-category or user identifiers,
-  - a **match list** of exact filenames or content hashes, or
+  - a **match list** of exact filenames or content hashes (the listed files
+    are selected wherever they are; the criteria fields are ignored), or
   - **per-row criteria**, where each row is its own search specification.
 - **Naming rules** with placeholders (e.g. `{courseshortname}_{seq}_{originalname}`).
 - Optional de-duplication so each image is exported only once.

@@ -60,3 +60,33 @@ function tool_imageextractor_pluginfile($course, $cm, $context, $filearea, $args
     // Always force download for these (potentially very large) archives.
     send_stored_file($file, 0, 0, true, $options);
 }
+
+/**
+ * Render a small progress bar with a "done / total (pct%)" caption, used on
+ * the jobs overview and the job view page.
+ *
+ * @param int $done Items processed so far.
+ * @param int $total Total items the job matched.
+ * @return string HTML, or an em dash when there is nothing to report.
+ */
+function tool_imageextractor_progress_bar(int $done, int $total): string {
+    if ($total <= 0) {
+        return '-';
+    }
+    $done = min(max($done, 0), $total);
+    $pct = (int) round(($done / $total) * 100);
+
+    $bar = html_writer::div(
+        html_writer::div('', 'progress-bar', [
+            'role' => 'progressbar',
+            'style' => 'width: ' . $pct . '%',
+            'aria-valuenow' => $pct,
+            'aria-valuemin' => 0,
+            'aria-valuemax' => 100,
+            'aria-label' => get_string('progress', 'tool_imageextractor'),
+        ]),
+        'progress',
+        ['style' => 'min-width: 6em']
+    );
+    return $bar . html_writer::div($done . ' / ' . $total . ' (' . $pct . '%)', 'small text-nowrap');
+}

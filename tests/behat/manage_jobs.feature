@@ -22,6 +22,19 @@ Feature: Create and scope image extraction jobs
     And I should see "Extract"
 
   @javascript
+  Scenario: A CSV match list hides the criteria fields
+    When I visit "/admin/tool/imageextractor/index.php"
+    And I press "New extraction job"
+    And I expand all fieldsets
+    Then I should see "MIME types"
+    And I should see "Course categories"
+    When I set the field "Select files using" to "A CSV match list (exact filenames or content hashes)"
+    Then I should not see "MIME types"
+    And I should not see "Course categories"
+    And I should not see "Live estimate"
+    And I should see "CSV file"
+
+  @javascript
   Scenario: Only the sections relevant to the chosen job type are shown
     Given the following config values are set as admin:
       | allow_replace | 1 | tool_imageextractor |
