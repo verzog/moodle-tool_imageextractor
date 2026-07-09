@@ -43,7 +43,9 @@ const collect = (form) => {
         return el ? String(el.value).trim() : '';
     };
     const checked = (name) => {
-        const el = form.elements[name];
+        // advcheckbox renders a hidden input sharing the name before the real
+        // checkbox, so target the checkbox control explicitly.
+        const el = form.querySelector('input[type="checkbox"][name="' + name + '"]');
         return el ? Boolean(el.checked) : false;
     };
     const number = (name) => {
@@ -51,7 +53,9 @@ const collect = (form) => {
         return Number.isNaN(parsed) ? 0 : parsed;
     };
     const ids = (name) => {
-        const el = form.elements[name];
+        // Multiple selects/autocompletes submit as name[]; the underlying
+        // <select> carries the current selection as selected options.
+        const el = form.querySelector('select[name="' + name + '[]"]') || form.elements[name];
         if (!el || !el.selectedOptions) {
             return [];
         }

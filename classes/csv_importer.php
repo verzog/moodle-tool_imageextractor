@@ -228,24 +228,30 @@ class csv_importer {
             if (($v = self::first_value($row, ['maxsize', 'max'])) !== '') {
                 $group['maxsize'] = (int) $v;
             }
+            // A row that names a scope we cannot resolve is skipped entirely,
+            // rather than run unrestricted: silently widening the search would
+            // be surprising (and, for replace jobs, unsafe).
+            $skip = false;
             if (($v = self::first_value($row, ['courseid', 'course'])) !== '') {
                 $id = self::resolve_course($v);
                 if ($id) {
                     $group['courseids'] = [$id];
                 } else {
                     $warnings[] = get_string('csvunknowncourse', 'tool_imageextractor', s($v));
+                    $skip = true;
                 }
             }
-            if (($v = self::first_value($row, ['categoryid', 'category', 'coursecategory'])) !== '') {
+            if (($v = self::first_value($row, ['categoryid', 'category', 'coursecategory', 'categoryidnumber'])) !== '') {
                 $id = self::resolve_category($v);
                 if ($id) {
                     $group['categoryids'] = [$id];
                 } else {
                     $warnings[] = get_string('csvunknowncategory', 'tool_imageextractor', s($v));
+                    $skip = true;
                 }
             }
 
-            if ($group) {
+            if (!$skip && $group) {
                 $groups[] = $group;
             }
         }

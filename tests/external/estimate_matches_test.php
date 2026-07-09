@@ -26,7 +26,7 @@ namespace tool_imageextractor\external;
  *
  * @covers \tool_imageextractor\external\estimate_matches
  */
-final class external_estimate_matches_test extends \externallib_advanced_testcase {
+final class estimate_matches_test extends \core_external\tests\externallib_testcase {
     /**
      * Default (empty) arguments for the web service, overridden per test.
      *
