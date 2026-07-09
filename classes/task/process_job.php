@@ -57,6 +57,10 @@ class process_job extends \core\task\adhoc_task {
 
         $data = (object) $this->get_custom_data();
         $jobid = (int) ($data->jobid ?? 0);
+        // A fresh run defers its (potentially large) clear of the previous
+        // run's items and volumes to here, off the web request. Re-queued
+        // continuation tasks do not set this.
+        $clearfirst = !empty($data->clearfirst);
         if ($jobid <= 0) {
             return;
         }
@@ -84,6 +88,12 @@ class process_job extends \core\task\adhoc_task {
 
         try {
             if ($job->status === manager::STATUS_QUEUED) {
+                // Clear any stale results here (deferred off the web request)
+                // before matching, so a re-run starts from a clean slate
+                // without duplicating items.
+                if ($clearfirst) {
+                    manager::clear_results($jobid);
+                }
                 $this->prepare($job);
                 $job = $DB->get_record('tool_imageextractor_job', ['id' => $jobid], '*', MUST_EXIST);
             }

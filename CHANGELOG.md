@@ -6,6 +6,30 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.9.0-beta] — 2026-07-09
+
+Build `2026070904`.
+
+### Fixed
+- **Timeout when running, re-running, editing or clearing a large replace
+  job.** Even after the earlier set-based backup delete, removing a previous
+  run's item rows still happened *inside the web request* — pressing Run,
+  Analyse, "Clear results", or saving an edited job could delete millions of
+  rows synchronously and blow past the gateway limit (504). None of these
+  paths delete synchronously any more:
+  - **Run / Analyse** now only queue the background task and return
+    immediately; the task clears the prior run's items and backups as its
+    first step, on the next cron, with no time limit. (A reviewed replace job
+    still applies its already-prepared targets without clearing them.)
+  - **Clear results** and **editing a job** hand a large result set to a new
+    background `reset_job` task; the job shows a **Clearing** state until it
+    returns to draft. A job with nothing heavy to remove is still cleared
+    inline.
+
+### Added
+- A **Clearing** job state (shown on the overview and job page) for the window
+  while a background reset runs, and unit coverage for the deferred-clear path.
+
 ## [0.8.0-beta] — 2026-07-09
 
 Build `2026070903`.
@@ -242,6 +266,7 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.9.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.8.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.7.1-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.7.0-beta]: https://github.com/verzog/moodle-tool_imageextractor

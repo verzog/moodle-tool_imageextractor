@@ -6,7 +6,7 @@ and either **exporting** them (with metadata and naming rules) or
 sets (50 GB or more) by doing all heavy work in throttled, resumable background
 tasks.
 
-**Status:** beta (release `0.8.0-beta`). Feature-complete and CI-tested; suitable
+**Status:** beta (release `0.9.0-beta`). Feature-complete and CI-tested; suitable
 for testing on non-production sites. See [`CHANGELOG.md`](CHANGELOG.md) for the
 release history.
 
@@ -94,6 +94,12 @@ review**: the job page presents an exact preview — how many files will be
 replaced or skipped, with a sample — and a final "are you sure" confirmation.
 Only confirming that review queues the destructive apply phase; "Clear
 results" discards the analysis instead.
+
+Removing a previous run's results — whether by Run, Analyse, "Clear results"
+or editing the job — never happens in the web request: on a large site that
+delete can take minutes. It runs in a background task on the next cron
+instead (the job shows **Clearing** briefly), so none of these actions can
+time out at the gateway.
 
 ### Command line
 
