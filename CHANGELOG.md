@@ -6,6 +6,24 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.5.1-beta] — 2026-07-09
+
+Build `2026070104`.
+
+### Added
+- **CSV scope lists can name course categories**, not just courses and users.
+  A `category` / `categoryid` column (or `categoryidnumber`) is resolved by id,
+  idnumber or name, in both scope and per-row CSV modes; unresolved values are
+  reported as warnings and skipped.
+- **Behat acceptance tests** covering creating an extract job, the server-side
+  Estimate button, the live (AJAX) estimate updating as criteria change, and
+  scoping a job to a course category.
+- Unit coverage for CSV category resolution (`csv_importer_test`).
+
+### Changed
+- Added a help tooltip to the live-estimate field explaining it is approximate
+  and ignores CSV refinement; the scope-CSV help now documents categories.
+
 ## [0.5.0-beta] — 2026-07-01
 
 Build `2026070103`.
@@ -116,6 +134,8 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.5.1-beta]: https://github.com/verzog/moodle-tool_imageextractor
+[0.5.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.4.2-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.4.1-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.4.0-beta]: https://github.com/verzog/moodle-tool_imageextractor

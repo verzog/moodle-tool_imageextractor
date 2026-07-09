@@ -129,6 +129,7 @@ class job_form extends \moodleform {
             get_string('estimatelive', 'tool_imageextractor'),
             \html_writer::span('—', 'tool_imageextractor-estimate', ['data-region' => 'tool_imageextractor-estimate'])
         );
+        $mform->addHelpButton('estimatelive', 'estimatelive', 'tool_imageextractor');
 
         $this->add_action_buttons();
     }

@@ -56,6 +56,27 @@ final class csv_importer_test extends \advanced_testcase {
     }
 
     /**
+     * Scope mode resolves category identifiers (id, idnumber or name) to
+     * category ids, alongside courses.
+     */
+    public function test_scope_mode_categories(): void {
+        $this->resetAfterTest();
+        $generator = $this->getDataGenerator();
+        $category = $generator->create_category(['name' => 'Science', 'idnumber' => 'SCI']);
+        $course = $generator->create_course(['shortname' => 'BIO']);
+
+        $csv = "category,courseid\nSCI,BIO\nScience,\n{$category->id},\nNOPE,\n";
+        $result = csv_importer::to_criteria(csv_importer::parse_rows($csv), 'scope');
+
+        // The three category references (idnumber, name, id) resolve to the one
+        // category; the course column resolves to the course.
+        $this->assertSame([(int) $category->id], $result['criteria']['categoryids']);
+        $this->assertContains((int) $course->id, $result['criteria']['courseids']);
+        // The unresolved "NOPE" category produced a warning.
+        $this->assertNotEmpty($result['warnings']);
+    }
+
+    /**
      * Match mode separates filenames from content hashes.
      */
     public function test_match_mode(): void {
