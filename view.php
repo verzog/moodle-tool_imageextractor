@@ -57,70 +57,48 @@ if ($action !== '' && confirm_sesskey()) {
             \core\notification::error(get_string('replaceadminonly', 'tool_imageextractor'));
             redirect($viewurl);
         }
+        if (!$isreplace) {
+            if ($confirm) {
+                manager::queue_job($id);
+                \core\notification::success(get_string('jobqueued', 'tool_imageextractor'));
+                redirect($viewurl);
+            }
+            // No synchronous estimate here: counting matches can take minutes
+            // on a large site and used to time out at the gateway. The edit
+            // form offers an estimate; the run itself reports exact totals.
+            echo $OUTPUT->header();
+            echo $OUTPUT->confirm(
+                get_string('confirmrunbackground', 'tool_imageextractor', format_string($job->name)),
+                new moodle_url($viewurl, ['action' => 'run', 'confirm' => 1, 'sesskey' => sesskey()]),
+                $viewurl
+            );
+            echo $OUTPUT->footer();
+            die();
+        }
+
+        // Replace jobs run in two phases. Run first queues a background
+        // analyse pass (nothing is changed); once that finishes the job page
+        // shows an exact preview, and confirming from there - status
+        // "review" - queues the destructive apply phase. The web flow can
+        // therefore never reach apply without a completed analysis.
+        if ($job->status === manager::STATUS_REVIEW) {
+            if ($confirm) {
+                manager::queue_job($id);
+                \core\notification::success(get_string('jobqueued', 'tool_imageextractor'));
+            }
+            redirect($viewurl);
+        }
         if ($confirm) {
-            manager::queue_job($id);
-            \core\notification::success(get_string('jobqueued', 'tool_imageextractor'));
+            manager::queue_analyse($id);
+            \core\notification::success(get_string('analysequeued', 'tool_imageextractor'));
             redirect($viewurl);
         }
         echo $OUTPUT->header();
-        if ($isreplace) {
-            // Destructive: show a strong warning and a preview of the files that
-            // would be overwritten before asking for a final confirmation.
-            $preview = (new \tool_imageextractor\replacer($job))->preview();
-            echo $OUTPUT->notification(get_string('replacewarning', 'tool_imageextractor'), 'error');
-            echo $OUTPUT->heading(get_string('replacepreviewheading', 'tool_imageextractor'), 3);
-            echo html_writer::div(get_string('replacepreviewsummary', 'tool_imageextractor', (object) [
-                'total'       => $preview['total'],
-                'scanned'     => $preview['scanned'],
-                'willreplace' => $preview['willreplace'],
-                'willskip'    => $preview['willskip'],
-            ]), 'mb-2');
-            if ($preview['truncated']) {
-                echo $OUTPUT->notification(
-                    get_string('replacepreviewtruncated', 'tool_imageextractor', $preview['scanned']),
-                    'info'
-                );
-            }
-            if ($preview['rows']) {
-                $ptable = new html_table();
-                $ptable->attributes['class'] = 'generaltable';
-                $ptable->head = [
-                    get_string('colfilename', 'tool_imageextractor'),
-                    get_string('component', 'tool_imageextractor'),
-                    get_string('filearea', 'tool_imageextractor'),
-                    get_string('colsize', 'tool_imageextractor'),
-                    get_string('replacement', 'tool_imageextractor'),
-                ];
-                foreach ($preview['rows'] as $prow) {
-                    $ptable->data[] = [
-                        s($prow->filename),
-                        s($prow->component),
-                        s($prow->filearea),
-                        display_size((int) $prow->filesize),
-                        $prow->replacement !== null
-                            ? s($prow->replacement)
-                            : html_writer::tag('em', get_string('replacenomatchcell', 'tool_imageextractor')),
-                    ];
-                }
-                echo html_writer::table($ptable);
-            }
-            echo $OUTPUT->confirm(
-                get_string('confirmreplacefinal', 'tool_imageextractor', $preview['willreplace']),
-                new moodle_url($viewurl, ['action' => 'run', 'confirm' => 1, 'sesskey' => sesskey()]),
-                $viewurl
-            );
-        } else {
-            $estimate = manager::estimate($job);
-            $message = get_string('confirmrun', 'tool_imageextractor', (object) [
-                'count' => $estimate['count'],
-                'size'  => display_size($estimate['bytes']),
-            ]);
-            echo $OUTPUT->confirm(
-                $message,
-                new moodle_url($viewurl, ['action' => 'run', 'confirm' => 1, 'sesskey' => sesskey()]),
-                $viewurl
-            );
-        }
+        echo $OUTPUT->confirm(
+            get_string('confirmanalyse', 'tool_imageextractor'),
+            new moodle_url($viewurl, ['action' => 'run', 'confirm' => 1, 'sesskey' => sesskey()]),
+            $viewurl
+        );
         echo $OUTPUT->footer();
         die();
     }
@@ -220,7 +198,57 @@ if ((int) $job->failedcount > 0) {
 echo html_writer::table($summary);
 
 if ($running) {
-    echo $OUTPUT->notification(get_string('runninghint', 'tool_imageextractor'), 'info');
+    // A replace job with no matched totals yet is still in its background
+    // analyse phase; afterwards the generic processing hint applies.
+    $hint = ($isreplace && (int) $job->totalmatched === 0) ? 'analysinghint' : 'runninghint';
+    echo $OUTPUT->notification(get_string($hint, 'tool_imageextractor'), 'info');
+}
+
+// An analysed replace job awaits review: show the exact preview (read from
+// the prepared targets - no file-table scan) and the final confirmation.
+if ($isreplace && $job->status === manager::STATUS_REVIEW) {
+    $review = manager::review_summary($id);
+    echo $OUTPUT->notification(get_string('replacewarning', 'tool_imageextractor'), 'error');
+    echo $OUTPUT->heading(get_string('replacepreviewheading', 'tool_imageextractor'), 3);
+    echo html_writer::div(get_string('reviewsummary', 'tool_imageextractor', (object) [
+        'total'       => $review['total'],
+        'willreplace' => $review['willreplace'],
+        'willskip'    => $review['willskip'],
+    ]), 'mb-2');
+    if ($review['truncated']) {
+        echo $OUTPUT->notification(
+            get_string('reviewtruncated', 'tool_imageextractor', count($review['rows'])),
+            'info'
+        );
+    }
+    if ($review['rows']) {
+        $ptable = new html_table();
+        $ptable->attributes['class'] = 'generaltable';
+        $ptable->head = [
+            get_string('colfilename', 'tool_imageextractor'),
+            get_string('component', 'tool_imageextractor'),
+            get_string('filearea', 'tool_imageextractor'),
+            get_string('colsize', 'tool_imageextractor'),
+            get_string('replacement', 'tool_imageextractor'),
+        ];
+        foreach ($review['rows'] as $prow) {
+            $ptable->data[] = [
+                s($prow->filename),
+                s($prow->component),
+                s($prow->filearea),
+                display_size((int) $prow->filesize),
+                $prow->replacementname !== null
+                    ? s($prow->replacementname)
+                    : html_writer::tag('em', get_string('replacenomatchcell', 'tool_imageextractor')),
+            ];
+        }
+        echo html_writer::table($ptable);
+    }
+    echo $OUTPUT->confirm(
+        get_string('confirmreplacefinal', 'tool_imageextractor', $review['willreplace']),
+        new moodle_url($viewurl, ['action' => 'run', 'confirm' => 1, 'sesskey' => sesskey()]),
+        $viewurl
+    );
 }
 
 // Download links (extract jobs only).
@@ -262,9 +290,10 @@ echo html_writer::start_div('mt-3');
 if (!$running) {
     // A replace job with restorable backups must be restored or cleared before
     // it can run again, so we hide Run until then (rerunning would otherwise
-    // discard the backups of the original files).
+    // discard the backups of the original files). In review the confirm above
+    // replaces the Run button ("Clear results" discards the analysis).
     $restorable = $isreplace && manager::has_restorable($id);
-    if (!$restorable) {
+    if (!$restorable && $job->status !== manager::STATUS_REVIEW) {
         echo $OUTPUT->single_button(
             new moodle_url($viewurl, ['action' => 'run', 'sesskey' => sesskey()]),
             get_string('runjob', 'tool_imageextractor'),

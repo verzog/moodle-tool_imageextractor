@@ -6,6 +6,37 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.6.0-beta] — 2026-07-09
+
+Build `2026070900`.
+
+### Fixed
+- **Gateway timeout (504) when running a replace job.** The pre-run preview
+  used to scan (and sort) the entire matched file set inside the web request,
+  which exceeded the proxy/gateway time limit on large sites.
+
+### Changed
+- **Replace jobs now run in two phases.** Pressing Run queues a background
+  **analyse** pass that matches the targets and resolves their replacements
+  without changing anything. The job then waits in a new **Awaiting review**
+  state, where the job page shows an *exact* preview (counts and a sample,
+  read from the prepared targets — no file-table scan) with the final
+  confirmation. Confirming queues the destructive apply phase; the web flow
+  can no longer reach apply without a completed analysis. "Clear results"
+  discards an analysis.
+- The extract Run confirmation no longer computes a synchronous match count
+  (same timeout class); use the edit form's estimate instead — exact totals
+  appear on the job page as the run progresses.
+- The CLI is unchanged (`--execute --confirm` still applies in one shot,
+  preparing inside the task); a dry run on an analysed job now reports the
+  stored breakdown instead of re-scanning.
+- Clearing results now also resets the stored matched totals, and a retried
+  analyse cannot duplicate prepared targets.
+
+### Added
+- PHPUnit coverage for the analyse → review → apply state machine, the CLI
+  one-shot path, and discarding an analysis.
+
 ## [0.5.1-beta] — 2026-07-09
 
 Build `2026070104`.
@@ -137,6 +168,7 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.6.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.5.1-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.5.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.4.2-beta]: https://github.com/verzog/moodle-tool_imageextractor

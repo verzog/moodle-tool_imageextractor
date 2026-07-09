@@ -35,6 +35,9 @@ class manager {
     /** @var string Currently being processed (matching or packing). */
     const STATUS_PROCESSING = 'processing';
 
+    /** @var string Replace job analysed; awaiting admin review before applying. */
+    const STATUS_REVIEW = 'review';
+
     /** @var string Finished successfully. */
     const STATUS_COMPLETED = 'completed';
 
@@ -375,6 +378,20 @@ class manager {
         if ($job->jobtype === 'replace' && self::has_restorable($jobid)) {
             throw new \moodle_exception('cannotrerunwithbackups', 'tool_imageextractor');
         }
+
+        if ($job->jobtype === 'replace' && $job->status === self::STATUS_REVIEW) {
+            // Analysed and reviewed: apply the already-prepared targets. Do NOT
+            // clear results here - that would delete the prepared item rows the
+            // apply phase consumes.
+            $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_QUEUED, ['id' => $jobid]);
+            $DB->set_field('tool_imageextractor_job', 'error', null, ['id' => $jobid]);
+            $DB->set_field('tool_imageextractor_job', 'timecompleted', 0, ['id' => $jobid]);
+            $task = new task\process_replace();
+            $task->set_custom_data(['jobid' => $jobid, 'op' => 'apply']);
+            \core\task\manager::queue_adhoc_task($task, true);
+            return;
+        }
+
         // Reset run state so a re-run starts cleanly.
         self::clear_results($jobid);
         $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_QUEUED, ['id' => $jobid]);
@@ -383,6 +400,8 @@ class manager {
         $DB->set_field('tool_imageextractor_job', 'timecompleted', 0, ['id' => $jobid]);
 
         if ($job->jobtype === 'replace') {
+            // No prior analyse phase (e.g. driven from the CLI): the apply task
+            // prepares the targets itself before its first batch.
             $task = new task\process_replace();
             $task->set_custom_data(['jobid' => $jobid, 'op' => 'apply']);
             \core\task\manager::queue_adhoc_task($task, true);
@@ -392,6 +411,80 @@ class manager {
         $task = new task\process_job();
         $task->set_custom_data(['jobid' => $jobid]);
         \core\task\manager::queue_adhoc_task($task, true);
+    }
+
+    /**
+     * Queue the background analyse phase of a replace job: match the targets
+     * and resolve their replacements without changing anything, then leave the
+     * job awaiting review. Nothing is replaced until the admin confirms the
+     * resulting preview, which queues the apply phase via queue_job().
+     *
+     * This keeps the (potentially minutes-long) scan of the file table out of
+     * the web request, which used to time out at the gateway on large sites.
+     *
+     * @param int $jobid
+     * @return void
+     */
+    public static function queue_analyse(int $jobid): void {
+        global $DB;
+
+        $job = self::get_job($jobid);
+        if ($job->jobtype !== 'replace') {
+            throw new \coding_exception('Only replace jobs have an analyse phase.');
+        }
+        // Analysing clears previous results, so the same stranded-backup guard
+        // as queue_job() applies.
+        if (self::has_restorable($jobid)) {
+            throw new \moodle_exception('cannotrerunwithbackups', 'tool_imageextractor');
+        }
+
+        self::clear_results($jobid);
+        $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_QUEUED, ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'error', null, ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'timestarted', 0, ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'timecompleted', 0, ['id' => $jobid]);
+
+        $task = new task\process_replace();
+        $task->set_custom_data(['jobid' => $jobid, 'op' => 'analyse']);
+        \core\task\manager::queue_adhoc_task($task, true);
+    }
+
+    /**
+     * Exact summary of an analysed replace job for the review screen, read
+     * from the prepared item rows - cheap indexed queries, no file-table scan.
+     *
+     * @param int $jobid
+     * @param int $samplelimit Maximum sample rows to return.
+     * @return array ['total','willreplace','willskip','truncated','rows']
+     */
+    public static function review_summary(int $jobid, int $samplelimit = 50): array {
+        global $DB;
+
+        $job = self::get_job($jobid);
+        $willreplace = $DB->count_records(
+            'tool_imageextractor_item',
+            ['jobid' => $jobid, 'status' => 'pending']
+        );
+        $willskip = $DB->count_records(
+            'tool_imageextractor_item',
+            ['jobid' => $jobid, 'status' => 'skipped']
+        );
+        $rows = array_values($DB->get_records(
+            'tool_imageextractor_item',
+            ['jobid' => $jobid],
+            'id ASC',
+            'id, filename, component, filearea, filesize, replacementname',
+            0,
+            $samplelimit
+        ));
+
+        return [
+            'total'       => (int) $job->totalmatched,
+            'willreplace' => $willreplace,
+            'willskip'    => $willskip,
+            'truncated'   => ((int) $job->totalmatched) > count($rows),
+            'rows'        => $rows,
+        ];
     }
 
     /**
@@ -456,6 +549,8 @@ class manager {
         $DB->delete_records('tool_imageextractor_volume', ['jobid' => $jobid]);
         $fs->delete_area_files($context->id, self::COMPONENT, 'manifest', $jobid);
 
+        $DB->set_field('tool_imageextractor_job', 'totalmatched', 0, ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'totalbytes', 0, ['id' => $jobid]);
         $DB->set_field('tool_imageextractor_job', 'processedcount', 0, ['id' => $jobid]);
         $DB->set_field('tool_imageextractor_job', 'processedbytes', 0, ['id' => $jobid]);
         $DB->set_field('tool_imageextractor_job', 'failedcount', 0, ['id' => $jobid]);
