@@ -23,6 +23,7 @@ require(__DIR__ . '/../../../config.php');
 require_once($CFG->libdir . '/adminlib.php');
 
 use tool_imageextractor\manager;
+use tool_imageextractor\matcher;
 use tool_imageextractor\form\job_form;
 use tool_imageextractor\form\replace_form;
 use tool_imageextractor\form\criteria_fields;
@@ -132,8 +133,34 @@ if ($data = $mform->get_data()) {
     redirect(new moodle_url('/admin/tool/imageextractor/view.php', ['id' => $result['id']]));
 }
 
+// The "Estimate" button reloads the form without saving; compute a rough match
+// count from the entered criteria (ignoring any CSV refinement) to show above
+// the form. Only the extract form carries this button.
+if (!$isreplace) {
+    // Enhance the extract form with a live match-count estimate.
+    $PAGE->requires->js_call_amd('tool_imageextractor/estimate', 'init');
+}
+
+$estimate = null;
+if (!$isreplace && $mform->no_submit_button_pressed()) {
+    $submitted = $mform->get_submitted_data();
+    if ($submitted) {
+        $criteria = manager::criteria_from_data($submitted);
+        $estimate = (new matcher($criteria, !empty($submitted->dedupe)))->estimate();
+    }
+}
+
 echo $OUTPUT->header();
 echo $OUTPUT->heading($isreplace ? get_string('newreplacejob', 'tool_imageextractor')
     : get_string('newjob', 'tool_imageextractor'));
+if ($estimate !== null) {
+    echo $OUTPUT->notification(
+        get_string('estimateresult', 'tool_imageextractor', [
+            'count' => $estimate['count'],
+            'size'  => display_size($estimate['bytes']),
+        ]),
+        \core\output\notification::NOTIFY_INFO
+    );
+}
 $mform->display();
 echo $OUTPUT->footer();

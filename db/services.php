@@ -12,7 +12,7 @@
 // is provided "as is", without warranty of any kind, express or implied.
 
 /**
- * Plugin version and metadata.
+ * External (web service) function definitions.
  *
  * @package    tool_imageextractor
  * @copyright  © Skin Cancer College Australasia
@@ -21,9 +21,12 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->component = 'tool_imageextractor';
-$plugin->version   = 2026070104;
-$plugin->requires  = 2025041400; // Moodle 5.0.
-$plugin->supported = [500, 502];
-$plugin->maturity  = MATURITY_BETA;
-$plugin->release   = '0.5.1-beta (Build 2026070104)';
+$functions = [
+    'tool_imageextractor_estimate_matches' => [
+        'classname'     => 'tool_imageextractor\\external\\estimate_matches',
+        'description'   => 'Estimate how many files (and how many bytes) match the given criteria.',
+        'type'          => 'read',
+        'ajax'          => true,
+        'capabilities'  => 'tool/imageextractor:manage',
+    ],
+];

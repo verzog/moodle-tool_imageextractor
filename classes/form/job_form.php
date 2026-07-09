@@ -59,6 +59,21 @@ class job_form extends \moodleform {
         $mform->addElement('header', 'criteriaheader', get_string('criteria', 'tool_imageextractor'));
         criteria_fields::add($mform);
 
+        // Match estimate, kept inside the (expanded) criteria section so the
+        // live figure is visible without opening a collapsed fieldset. The
+        // no-submit button recomputes server-side without saving; the inline
+        // region is updated live by the estimate AMD module and falls back to
+        // the button when JavaScript is unavailable.
+        $mform->addElement('submit', 'estimatematches', get_string('estimatematches', 'tool_imageextractor'));
+        $mform->registerNoSubmitButton('estimatematches');
+        $mform->addElement(
+            'static',
+            'estimatelive',
+            get_string('estimatelive', 'tool_imageextractor'),
+            \html_writer::span('—', 'tool_imageextractor-estimate', ['data-region' => 'tool_imageextractor-estimate'])
+        );
+        $mform->addHelpButton('estimatelive', 'estimatelive', 'tool_imageextractor');
+
         // CSV.
         $mform->addElement('header', 'csvheader', get_string('csvupload', 'tool_imageextractor'));
 

@@ -101,16 +101,18 @@ class csv_importer {
      */
     protected static function scope_criteria(array $rows): array {
         $courseids = [];
+        $categoryids = [];
         $userids = [];
         $warnings = [];
 
         foreach ($rows as $row) {
             $coursekeys = ['courseid', 'course', 'courseshortname', 'shortname', 'courseidnumber', 'idnumber'];
             $courseref = self::first_value($row, $coursekeys);
+            $categoryref = self::first_value($row, ['categoryid', 'category', 'coursecategory', 'categoryidnumber']);
             $userref = self::first_value($row, ['userid', 'user', 'username', 'useremail', 'email']);
 
             // Fall back to the first column when no recognised header is present.
-            if ($courseref === '' && $userref === '') {
+            if ($courseref === '' && $categoryref === '' && $userref === '') {
                 $courseref = (string) ($row['__first'] ?? '');
             }
 
@@ -120,6 +122,14 @@ class csv_importer {
                     $courseids[] = $id;
                 } else {
                     $warnings[] = get_string('csvunknowncourse', 'tool_imageextractor', s($courseref));
+                }
+            }
+            if ($categoryref !== '') {
+                $id = self::resolve_category($categoryref);
+                if ($id) {
+                    $categoryids[] = $id;
+                } else {
+                    $warnings[] = get_string('csvunknowncategory', 'tool_imageextractor', s($categoryref));
                 }
             }
             if ($userref !== '') {
@@ -135,6 +145,9 @@ class csv_importer {
         $criteria = [];
         if ($courseids) {
             $criteria['courseids'] = array_values(array_unique($courseids));
+        }
+        if ($categoryids) {
+            $criteria['categoryids'] = array_values(array_unique($categoryids));
         }
         if ($userids) {
             $criteria['userids'] = array_values(array_unique($userids));
@@ -215,16 +228,30 @@ class csv_importer {
             if (($v = self::first_value($row, ['maxsize', 'max'])) !== '') {
                 $group['maxsize'] = (int) $v;
             }
+            // A row that names a scope we cannot resolve is skipped entirely,
+            // rather than run unrestricted: silently widening the search would
+            // be surprising (and, for replace jobs, unsafe).
+            $skip = false;
             if (($v = self::first_value($row, ['courseid', 'course'])) !== '') {
                 $id = self::resolve_course($v);
                 if ($id) {
                     $group['courseids'] = [$id];
                 } else {
                     $warnings[] = get_string('csvunknowncourse', 'tool_imageextractor', s($v));
+                    $skip = true;
+                }
+            }
+            if (($v = self::first_value($row, ['categoryid', 'category', 'coursecategory', 'categoryidnumber'])) !== '') {
+                $id = self::resolve_category($v);
+                if ($id) {
+                    $group['categoryids'] = [$id];
+                } else {
+                    $warnings[] = get_string('csvunknowncategory', 'tool_imageextractor', s($v));
+                    $skip = true;
                 }
             }
 
-            if ($group) {
+            if (!$skip && $group) {
                 $groups[] = $group;
             }
         }
@@ -270,6 +297,34 @@ class csv_importer {
             return (int) $id;
         }
         if ($id = $DB->get_field('course', 'id', ['idnumber' => $ref])) {
+            return (int) $id;
+        }
+        return 0;
+    }
+
+    /**
+     * Resolve a course-category identifier (id, idnumber or name) to a
+     * category id.
+     *
+     * @param string $ref
+     * @return int Category id, or 0 if it could not be resolved.
+     */
+    protected static function resolve_category(string $ref): int {
+        global $DB;
+        $ref = trim($ref);
+        if ($ref === '') {
+            return 0;
+        }
+        if (ctype_digit($ref)) {
+            if ($DB->record_exists('course_categories', ['id' => (int) $ref])) {
+                return (int) $ref;
+            }
+        }
+        if ($id = $DB->get_field('course_categories', 'id', ['idnumber' => $ref])) {
+            return (int) $id;
+        }
+        // Category names are not guaranteed unique; take the first match.
+        if ($id = $DB->get_field('course_categories', 'id', ['name' => $ref], IGNORE_MULTIPLE)) {
             return (int) $id;
         }
         return 0;
