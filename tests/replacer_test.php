@@ -150,6 +150,49 @@ final class replacer_test extends \advanced_testcase {
     }
 
     /**
+     * The public replacement resolver returns the exact stored file that apply
+     * would use - including its real filepath when a ZIP replacement stored the
+     * entry inside a folder - so the review preview links the right image.
+     */
+    public function test_replacement_for_resolves_stored_file(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+
+        // Single mode: the one replacement applies to every target, at root.
+        $single = $this->make_replace_job(['imageonly' => true], 'NEW');
+        $resolved = (new replacer($single))->replacement_for('whatever.png');
+        $this->assertNotNull($resolved);
+        $this->assertSame('/', $resolved->get_filepath());
+        $this->assertSame('new.png', $resolved->get_filename());
+
+        // Zip mode: entries can live inside folders, matched by basename. The
+        // resolver must return the file at its real (foldered) path.
+        $zipjob = $this->make_replace_job(['imageonly' => true], 'IGNORED');
+        $DB->set_field('tool_imageextractor_job', 'replacemode', 'zip', ['id' => $zipjob->id]);
+        $fs->delete_area_files($context->id, manager::COMPONENT, 'replacement', $zipjob->id);
+        $fs->create_file_from_string([
+            'contextid' => $context->id,
+            'component' => manager::COMPONENT,
+            'filearea'  => 'replacement',
+            'itemid'    => $zipjob->id,
+            'filepath'  => '/branding/',
+            'filename'  => 'logo.png',
+        ], 'ZIPPED');
+        $zipjob = $DB->get_record('tool_imageextractor_job', ['id' => $zipjob->id]);
+
+        $replacer = new replacer($zipjob);
+        $match = $replacer->replacement_for('logo.png');
+        $this->assertNotNull($match);
+        $this->assertSame('/branding/', $match->get_filepath());
+        $this->assertSame('logo.png', $match->get_filename());
+        // A target with no matching entry resolves to nothing (placeholder).
+        $this->assertNull($replacer->replacement_for('absent.png'));
+    }
+
+    /**
      * Missing-only mode targets only files whose content is gone.
      */
     public function test_missing_only(): void {

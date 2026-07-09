@@ -24,6 +24,7 @@ require_once($CFG->libdir . '/adminlib.php');
 require_once(__DIR__ . '/lib.php');
 
 use tool_imageextractor\manager;
+use tool_imageextractor\replacer;
 
 $id = required_param('id', PARAM_INT);
 $action = optional_param('action', '', PARAM_ALPHA);
@@ -234,6 +235,10 @@ if ($isreplace && $job->status === manager::STATUS_REVIEW) {
     // replacement shown side by side, so the outcome is obvious before applying.
     $thumbrows = array_slice($review['rows'], 0, 5);
     if ($thumbrows) {
+        // Resolve each replacement through the same path the apply uses, so the
+        // preview links the exact file that will be written (with its real
+        // filepath - a ZIP replacement may have stored it inside a folder).
+        $replacer = new replacer($job);
         echo $OUTPUT->heading(get_string('previewthumbsheading', 'tool_imageextractor'), 4);
         $ttable = new html_table();
         $ttable->attributes['class'] = 'generaltable';
@@ -256,17 +261,18 @@ if ($isreplace && $job->status === manager::STATUS_REVIEW) {
                     $prow->filename
                 );
             }
-            // The replacement (when this target has one) comes from the job's
-            // own replacement area.
+            // The replacement (when this target has one) is the exact stored
+            // file apply would use; build the URL from its real location.
             $newurl = null;
-            if ($prow->replacementname !== null) {
+            $replacementfile = $replacer->replacement_for($prow->filename);
+            if ($replacementfile) {
                 $newurl = moodle_url::make_pluginfile_url(
-                    $context->id,
-                    manager::COMPONENT,
-                    'replacement',
-                    $id,
-                    '/',
-                    $prow->replacementname
+                    $replacementfile->get_contextid(),
+                    $replacementfile->get_component(),
+                    $replacementfile->get_filearea(),
+                    $replacementfile->get_itemid(),
+                    $replacementfile->get_filepath(),
+                    $replacementfile->get_filename()
                 );
             }
             $ttable->data[] = [
