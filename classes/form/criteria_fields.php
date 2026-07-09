@@ -125,6 +125,19 @@ class criteria_fields {
             get_string('dateto', 'tool_imageextractor'),
             ['optional' => true]
         );
+
+        // A CSV match list nominates exact files, so none of these criteria
+        // apply while it is selected - the fields hide, and save_job ignores
+        // whatever they contain so stale values can never silently exclude a
+        // nominated file.
+        $matchhidden = [
+            'imageonly', 'courseids', 'categoryids', 'mimetypes', 'component',
+            'filearea', 'filenamepattern', 'minsizekb', 'maxsizekb',
+            'datefrom', 'dateto',
+        ];
+        foreach ($matchhidden as $element) {
+            $mform->hideIf($element, 'csvmode', 'eq', 'match');
+        }
     }
 
     /**

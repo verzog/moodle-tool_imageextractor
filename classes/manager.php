@@ -210,6 +210,17 @@ class manager {
             if ($content !== null) {
                 $rows = csv_importer::parse_rows($content);
                 $result = csv_importer::to_criteria($rows, $csvmode);
+                if ($csvmode === 'match'
+                        && (!empty($result['criteria']['filenames']) || !empty($result['criteria']['contenthashes']))) {
+                    // A match list nominates exact files: the criteria fields
+                    // are hidden on the form and ignored here, so a stale
+                    // course or MIME filter can never silently exclude a
+                    // nominated file. imageonly is switched off for the same
+                    // reason - the list is authoritative.
+                    $criteria = self::default_criteria();
+                    $criteria['imageonly'] = false;
+                    $formcourseids = [];
+                }
                 $criteria = array_merge($criteria, $result['criteria']);
                 $warnings = $result['warnings'];
             }

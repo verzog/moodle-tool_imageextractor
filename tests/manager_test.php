@@ -78,6 +78,50 @@ final class manager_test extends \advanced_testcase {
     }
 
     /**
+     * A match-list CSV nominates exact files: the criteria fields are ignored
+     * (and imageonly disabled) so stale values can never silently exclude a
+     * nominated file.
+     */
+    public function test_save_job_match_csv_ignores_criteria(): void {
+        global $USER;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $course = $this->getDataGenerator()->create_course();
+
+        $draftid = file_get_unused_draft_itemid();
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_user::instance($USER->id)->id,
+            'component' => 'user',
+            'filearea'  => 'draft',
+            'itemid'    => $draftid,
+            'filepath'  => '/',
+            'filename'  => 'match.csv',
+        ], "filename\nlogo.png\nbanner.jpg\n");
+
+        $data = (object) [
+            'name'      => 'Nominated files',
+            'jobtype'   => 'extract',
+            'csvmode'   => 'match',
+            'csvfile'   => $draftid,
+            // These would silently narrow the nominated list; all ignored.
+            'imageonly' => 1,
+            'courseids' => [$course->id],
+            'mimetypes' => 'image/png',
+            'component' => 'mod_forum',
+        ];
+
+        $result = manager::save_job($data);
+        $criteria = manager::decode_criteria(manager::get_job($result['id']));
+
+        $this->assertSame(['logo.png', 'banner.jpg'], $criteria['filenames']);
+        $this->assertFalse($criteria['imageonly']);
+        $this->assertSame([], $criteria['courseids']);
+        $this->assertSame([], $criteria['mimetypes']);
+        $this->assertSame('', $criteria['component']);
+    }
+
+    /**
      * criteria_from_data maps raw form fields to criteria: kilobyte sizes are
      * converted to bytes, a comma-separated MIME list is split, and id lists
      * are cleaned - without any database access.
