@@ -147,4 +147,39 @@ final class manager_test extends \advanced_testcase {
         $this->assertSame([5, 7], $criteria['courseids']);
         $this->assertSame([3], $criteria['categoryids']);
     }
+
+    /**
+     * The batch size falls back to a gentle default and honours a configured
+     * value, never returning less than one.
+     */
+    public function test_batch_size(): void {
+        $this->resetAfterTest();
+
+        $this->assertSame(50, manager::batch_size());
+
+        set_config('batch_size', 200, 'tool_imageextractor');
+        $this->assertSame(200, manager::batch_size());
+
+        // A nonsensical value falls back to the default rather than stalling.
+        set_config('batch_size', 0, 'tool_imageextractor');
+        $this->assertSame(50, manager::batch_size());
+    }
+
+    /**
+     * The throttle delay defaults to a gentle pause when never configured, but
+     * an explicit 0 (opt out) is respected rather than treated as unset.
+     */
+    public function test_throttle_delay(): void {
+        $this->resetAfterTest();
+
+        // Never configured: the gentle default applies.
+        $this->assertSame(20, manager::throttle_delay());
+
+        set_config('throttle_delay', 45, 'tool_imageextractor');
+        $this->assertSame(45, manager::throttle_delay());
+
+        // Explicit 0 means "no throttle", not "unset".
+        set_config('throttle_delay', 0, 'tool_imageextractor');
+        $this->assertSame(0, manager::throttle_delay());
+    }
 }

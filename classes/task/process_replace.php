@@ -32,9 +32,6 @@ use tool_imageextractor\replacer;
  * targets stay pending for the next tick.
  */
 class process_replace extends \core\task\adhoc_task {
-    /** @var int How many targets to process per run. */
-    const BATCH_SIZE = 200;
-
     /**
      * Cap how many replace tasks run in parallel. Replacing files writes to
      * the file storage, so the default of 1 avoids contention.
@@ -88,7 +85,7 @@ class process_replace extends \core\task\adhoc_task {
             $replacer = new replacer($job);
 
             if ($op === 'restore') {
-                $remaining = $replacer->restore_batch(self::BATCH_SIZE);
+                $remaining = $replacer->restore_batch(manager::batch_size());
                 mtrace('tool_imageextractor: replace job ' . $jobid . ' restored a batch, ' .
                     $remaining . ' remaining');
                 if ($remaining > 0) {
@@ -141,7 +138,7 @@ class process_replace extends \core\task\adhoc_task {
                 }
             }
 
-            $remaining = $replacer->apply_batch(self::BATCH_SIZE);
+            $remaining = $replacer->apply_batch(manager::batch_size());
             mtrace('tool_imageextractor: replace job ' . $jobid . ' processed a batch, ' .
                 $remaining . ' remaining');
 
@@ -169,6 +166,13 @@ class process_replace extends \core\task\adhoc_task {
     protected function requeue(int $jobid, string $op) {
         $task = new process_replace();
         $task->set_custom_data(['jobid' => $jobid, 'op' => $op]);
+        // Pace the next batch a little into the future so the database is left
+        // idle between bursts - otherwise one cron run grinds through every
+        // batch back-to-back and starves the rest of the site on a small server.
+        $delay = manager::throttle_delay();
+        if ($delay > 0) {
+            $task->set_next_run_time(time() + $delay);
+        }
         \core\task\manager::queue_adhoc_task($task);
     }
 }
