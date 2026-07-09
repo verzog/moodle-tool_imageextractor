@@ -23,6 +23,9 @@ Build `2026070104`.
 ### Changed
 - Added a help tooltip to the live-estimate field explaining it is approximate
   and ignores CSV refinement; the scope-CSV help now documents categories.
+- The match estimate (button and live region) now sits within the criteria
+  section, so the live figure stays visible without expanding a collapsed
+  fieldset.
 
 ## [0.5.0-beta] — 2026-07-01
 

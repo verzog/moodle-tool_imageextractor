@@ -28,6 +28,7 @@ Feature: Create and scope image extraction jobs
       | Science | 0        | SCI      |
     When I visit "/admin/tool/imageextractor/index.php"
     And I press "New extraction job"
+    And I expand all fieldsets
     And I set the field "Job name" to "Science images"
     And I set the field "Component" to "mod_forum"
     Then I should see "files" in the "[data-region='tool_imageextractor-estimate']" "css_element"

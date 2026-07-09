@@ -59,6 +59,21 @@ class job_form extends \moodleform {
         $mform->addElement('header', 'criteriaheader', get_string('criteria', 'tool_imageextractor'));
         criteria_fields::add($mform);
 
+        // Match estimate, kept inside the (expanded) criteria section so the
+        // live figure is visible without opening a collapsed fieldset. The
+        // no-submit button recomputes server-side without saving; the inline
+        // region is updated live by the estimate AMD module and falls back to
+        // the button when JavaScript is unavailable.
+        $mform->addElement('submit', 'estimatematches', get_string('estimatematches', 'tool_imageextractor'));
+        $mform->registerNoSubmitButton('estimatematches');
+        $mform->addElement(
+            'static',
+            'estimatelive',
+            get_string('estimatelive', 'tool_imageextractor'),
+            \html_writer::span('—', 'tool_imageextractor-estimate', ['data-region' => 'tool_imageextractor-estimate'])
+        );
+        $mform->addHelpButton('estimatelive', 'estimatelive', 'tool_imageextractor');
+
         // CSV.
         $mform->addElement('header', 'csvheader', get_string('csvupload', 'tool_imageextractor'));
 
@@ -112,24 +127,6 @@ class job_form extends \moodleform {
         $mform->setType('volumemb', PARAM_INT);
         $mform->setDefault('volumemb', $defaultvolmb ?: 2048);
         $mform->addHelpButton('volumemb', 'volumemb', 'tool_imageextractor');
-
-        // A no-submit button that recomputes the estimated match count from the
-        // current criteria without saving the job. Registered as no-submit so
-        // it reloads the form (preserving entered values) instead of validating
-        // and saving.
-        $mform->addElement('submit', 'estimatematches', get_string('estimatematches', 'tool_imageextractor'));
-        $mform->registerNoSubmitButton('estimatematches');
-
-        // Inline region that the estimate AMD module updates live as criteria
-        // change. Falls back to the Estimate button above when JavaScript is
-        // unavailable.
-        $mform->addElement(
-            'static',
-            'estimatelive',
-            get_string('estimatelive', 'tool_imageextractor'),
-            \html_writer::span('—', 'tool_imageextractor-estimate', ['data-region' => 'tool_imageextractor-estimate'])
-        );
-        $mform->addHelpButton('estimatelive', 'estimatelive', 'tool_imageextractor');
 
         $this->add_action_buttons();
     }
