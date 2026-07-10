@@ -26,6 +26,7 @@ $string['analysinghint'] = 'Analysing matching files in the background. Nothing 
 $string['backtojobs'] = 'Back to jobs';
 $string['backup'] = 'Back up originals';
 $string['backup_help'] = 'Keep a copy of each original file before replacing it, so the replacement can be undone with Restore.';
+$string['cannoteditrunning'] = 'This job cannot be edited while it is running or clearing. Wait for it to finish (or clear its results) first.';
 $string['cannotrerunwithbackups'] = 'This replace job still has restorable backups. Restore or clear them before running it again.';
 $string['categories'] = 'Course categories';
 $string['categories_help'] = 'Limit the search to files in the selected course categories, including every subcategory and course beneath them. Leave empty to search the whole site. Categories are combined (union) with any courses chosen above - a file matches when it is in any selected course or category.';

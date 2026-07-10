@@ -26,8 +26,20 @@
  * @return bool
  */
 function xmldb_tool_imageextractor_upgrade($oldversion) {
-    // No upgrade steps yet - the install schema is current. New steps go
-    // here, each guarded by an $oldversion check and an upgrade savepoint.
-    unset($oldversion);
+    global $DB;
+    $dbman = $DB->get_manager();
+
+    if ($oldversion < 2026070907) {
+        // Index (jobid, fileid) so the throttled matcher's per-batch idempotency
+        // delete (removing any items beyond the cursor before re-recording a
+        // page) stays cheap on a job with millions of items.
+        $table = new xmldb_table('tool_imageextractor_item');
+        $index = new xmldb_index('jobid-fileid', XMLDB_INDEX_NOTUNIQUE, ['jobid', 'fileid']);
+        if (!$dbman->index_exists($table, $index)) {
+            $dbman->add_index($table, $index);
+        }
+        upgrade_plugin_savepoint(true, 2026070907, 'tool', 'imageextractor');
+    }
+
     return true;
 }

@@ -72,9 +72,36 @@ class reset_job extends \core\task\adhoc_task {
         \core_php_time_limit::raise(0);
         \raise_memory_limit(MEMORY_EXTRA);
 
-        mtrace('tool_imageextractor: clearing results for job ' . $jobid . ' ("' . $job->name . '")');
-        manager::clear_results($jobid);
+        // Delete the item rows and their backups a bounded chunk at a time,
+        // re-queuing (paced) until none remain, so clearing a millions-row job
+        // never pins the database in a single pass.
+        $remaining = manager::clear_chunk($jobid, manager::batch_size());
+        if ($remaining > 0) {
+            mtrace('tool_imageextractor: clearing job ' . $jobid . ', ' . $remaining . ' item rows left');
+            $this->requeue($jobid);
+            return;
+        }
+
+        // Items gone; remove the bounded outputs and return the job to draft.
+        manager::clear_outputs($jobid);
         manager::mark_draft($jobid);
         mtrace('tool_imageextractor: job ' . $jobid . ' reset to draft');
+    }
+
+    /**
+     * Queue the next clearing chunk, paced into the future so the database is
+     * left idle between bursts.
+     *
+     * @param int $jobid
+     * @return void
+     */
+    protected function requeue(int $jobid) {
+        $task = new reset_job();
+        $task->set_custom_data(['jobid' => $jobid]);
+        $delay = manager::throttle_delay();
+        if ($delay > 0) {
+            $task->set_next_run_time(time() + $delay);
+        }
+        \core\task\manager::queue_adhoc_task($task);
     }
 }

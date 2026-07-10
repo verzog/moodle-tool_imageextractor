@@ -41,6 +41,15 @@ if ($job) {
 }
 $isreplace = ($type === 'replace');
 
+// Editing a job while it is queued, processing or clearing would change its
+// definition mid-flight - a paged match would then record some pages with the
+// old criteria and later pages with the new ones. Refuse until it settles.
+$busystatuses = [manager::STATUS_QUEUED, manager::STATUS_PROCESSING, manager::STATUS_CLEARING];
+if ($job && in_array($job->status, $busystatuses, true)) {
+    \core\notification::error(get_string('cannoteditrunning', 'tool_imageextractor'));
+    redirect(new moodle_url('/admin/tool/imageextractor/view.php', ['id' => $id]));
+}
+
 if ($isreplace && !manager::is_replace_allowed()) {
     throw new moodle_exception('replacedisabled', 'tool_imageextractor');
 }

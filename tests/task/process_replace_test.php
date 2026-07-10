@@ -253,4 +253,37 @@ final class process_replace_test extends \advanced_testcase {
         $this->assertSame(0, (int) $job->totalmatched);
         $this->assertSame(0, $DB->count_records('tool_imageextractor_item', ['jobid' => $job->id]));
     }
+
+    /**
+     * A match larger than one batch is analysed across several throttled runs
+     * (keyset pages), and the whole set is recorded exactly once - the paged,
+     * idempotent matching neither drops nor duplicates targets.
+     */
+    public function test_analyse_pages_a_large_match(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->expectOutputRegex('/tool_imageextractor:/');
+        $this->enable_plugin();
+        // Three matching targets with a batch of two forces matching to span
+        // more than one page.
+        set_config('batch_size', 2, 'tool_imageextractor');
+
+        $this->make_target('A');
+        $this->make_target('B');
+        $this->make_target('C');
+        $job = $this->make_replace_job('NEW');
+
+        manager::queue_analyse($job->id);
+        $this->drain_tasks();
+
+        $job = manager::get_job($job->id);
+        $this->assertSame(manager::STATUS_REVIEW, $job->status);
+        $this->assertSame(3, (int) $job->totalmatched);
+        // Exactly three item rows - no duplicates from the paged matching.
+        $this->assertSame(3, $DB->count_records('tool_imageextractor_item', ['jobid' => $job->id]));
+        $this->assertSame(3, $DB->count_records(
+            'tool_imageextractor_item',
+            ['jobid' => $job->id, 'status' => 'pending']
+        ));
+    }
 }

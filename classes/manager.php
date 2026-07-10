@@ -657,6 +657,61 @@ class manager {
     }
 
     /**
+     * Remove up to $limit of a job's item rows (and their per-item backup
+     * files), returning how many item rows remain. Deleting in bounded chunks
+     * across cron runs keeps a millions-row clear from pinning the database in
+     * one pass. The caller clears the (bounded) outputs once the items are gone.
+     *
+     * @param int $jobid
+     * @param int $limit Maximum item rows to delete this chunk.
+     * @return int Item rows still remaining for the job.
+     */
+    public static function clear_chunk(int $jobid, int $limit): int {
+        global $DB;
+        $fs = get_file_storage();
+        $context = self::context();
+
+        $ids = array_keys($DB->get_records(
+            'tool_imageextractor_item',
+            ['jobid' => $jobid],
+            'id ASC',
+            'id',
+            0,
+            $limit
+        ));
+        if ($ids) {
+            // Backups are stored under each item's id; remove this chunk's in
+            // one set-based pass, then the item rows themselves.
+            [$insql, $inparams] = $DB->get_in_or_equal($ids, SQL_PARAMS_NAMED, 'bkid');
+            $fs->delete_area_files_select($context->id, self::COMPONENT, 'backup', $insql, $inparams);
+            $DB->delete_records_list('tool_imageextractor_item', 'id', $ids);
+        }
+
+        return $DB->count_records('tool_imageextractor_item', ['jobid' => $jobid]);
+    }
+
+    /**
+     * Set a job's matched-file totals from the item rows it actually holds.
+     * Called once matching is complete rather than incrementing per page, so a
+     * retried or forked match batch (which re-inserts the same rows
+     * idempotently) cannot inflate the totals.
+     *
+     * @param int $jobid
+     * @return void
+     */
+    public static function recount_totals(int $jobid): void {
+        global $DB;
+        $rec = $DB->get_record_sql(
+            'SELECT COUNT(*) AS cnt, COALESCE(SUM(filesize), 0) AS bytes
+               FROM {tool_imageextractor_item}
+              WHERE jobid = :jobid',
+            ['jobid' => $jobid]
+        );
+        $DB->set_field('tool_imageextractor_job', 'totalmatched', (int) ($rec->cnt ?? 0), ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'totalbytes', (int) ($rec->bytes ?? 0), ['id' => $jobid]);
+    }
+
+    /**
      * Remove a job's generated outputs - the ZIP volumes, their rows, the
      * manifest - and zero its counters, without touching the (potentially huge)
      * item rows or per-item backups. These artifacts are few and bounded (one

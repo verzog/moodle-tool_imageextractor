@@ -6,6 +6,47 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.12.0-beta] — 2026-07-10
+
+Build `2026070907`.
+
+### Fixed
+- **A replace job's *matching* and *clearing* phases could still make the whole
+  site unresponsive.** The earlier throttle paced the apply batches, but a
+  replace job's analyse phase matched the entire file table and inserted every
+  item row in a single background run, and clearing a previous run deleted
+  millions of rows in one `DELETE` — either one pinned a small/shared database
+  for its whole duration, so every page (including saving a job) stalled while
+  a job ran. Both phases are now paced like the rest:
+  - **Matching** pages through the file table with a keyset cursor — one
+    bounded batch of targets per cron run, resumable, with the throttle delay
+    between batches. The paging is idempotent (a retried batch cannot duplicate
+    targets), and the running match count climbs as it goes.
+  - **Clearing** (on re-run, on "Clear results", and on editing a job) deletes
+    item rows and their backups a bounded chunk at a time across paced runs
+    instead of one giant delete.
+
+### Added
+- Index `(jobid, fileid)` on the item table so the paged matcher's per-batch
+  idempotency check stays cheap on a job with millions of rows.
+- Unit coverage for paged/idempotent matching and chunked clearing.
+
+### Safety
+- The paged match is **retry-safe**: a replayed batch (after a crashed worker)
+  removes and re-records only its own file ids — never rows a later page wrote
+  — and the matched totals are recomputed from the recorded rows at the end
+  rather than incremented per batch, so a replay can neither drop nor inflate
+  them.
+- A job can no longer be **edited while it is running or clearing**, so a paged
+  match can't record some pages with the old criteria and later pages with an
+  edited definition.
+
+### Note
+- Extract (download) jobs already cap each packing run by batch size; their
+  *matching* phase is not yet paged (duplicate-collapsing across pages needs
+  more care) and remains a single pass — a follow-up. Replace jobs, the case
+  that prompted this, are fully paced.
+
 ## [0.11.0-beta] — 2026-07-09
 
 Build `2026070906`.
@@ -307,6 +348,7 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.12.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.11.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.10.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.9.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
