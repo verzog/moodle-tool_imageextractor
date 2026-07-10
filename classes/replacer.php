@@ -155,13 +155,12 @@ class replacer {
      * @return void
      */
     public function prepare() {
-        manager::zero_counters((int) $this->job->id);
         $after = 0;
         do {
             $page = $this->prepare_page($after, 1000);
-            manager::bump_totals((int) $this->job->id, $page['matched'], $page['bytes']);
             $after = $page['lastid'];
         } while (!$page['exhausted']);
+        manager::recount_totals((int) $this->job->id);
     }
 
     /**
@@ -169,10 +168,10 @@ class replacer {
      * given file id. Returns the cursor to continue from, how many targets were
      * recorded, their total size, and whether the scan is exhausted.
      *
-     * The caller is responsible for the running totals (bump_totals) and for
-     * having cleared prior results; this only inserts the page's item rows.
-     * Any rows from a partially-completed later page (file id beyond the cursor)
-     * are removed first, so a retried run cannot duplicate targets.
+     * This only records the page's item rows; the caller sets the job totals
+     * from the recorded rows once matching completes (manager::recount_totals).
+     * The page first removes any items for its own file ids, so a retried run
+     * cannot duplicate targets while leaving other pages' rows untouched.
      *
      * @param int $afterid Cursor file id (0 to start).
      * @param int $limit Maximum files to record this page.
@@ -181,18 +180,26 @@ class replacer {
     public function prepare_page(int $afterid, int $limit): array {
         global $DB;
 
-        // Idempotency: drop anything a crashed previous attempt may have written
-        // for this page or beyond before re-recording it.
-        $DB->delete_records_select(
-            'tool_imageextractor_item',
-            'jobid = :jobid AND fileid > :afterid',
-            ['jobid' => (int) $this->job->id, 'afterid' => $afterid]
-        );
-
         // Unordered keyset by file id: replace targets every match, so no
         // hash-sorting is needed and each page streams straight from the index.
         $matcher = new matcher(manager::decode_criteria($this->job), false);
         $rows = $matcher->get_page($afterid, '', $limit, false);
+
+        // Idempotency: a crashed attempt (or a forked continuation) may have
+        // already inserted items for these exact files. Remove only THIS page's
+        // file ids before re-recording them, so a retry never disturbs the rows
+        // other pages have written (a broad "fileid > cursor" delete could wipe
+        // pages a later continuation already recorded).
+        if ($rows) {
+            [$insql, $inparams] = $DB->get_in_or_equal(array_keys($rows), SQL_PARAMS_NAMED, 'pf');
+            $inparams['jobid'] = (int) $this->job->id;
+            $DB->delete_records_select(
+                'tool_imageextractor_item',
+                "jobid = :jobid AND fileid $insql",
+                $inparams
+            );
+        }
+
         $missingonly = !empty($this->job->missingonly);
 
         $matched = 0;

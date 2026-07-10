@@ -31,6 +31,16 @@ Build `2026070907`.
   idempotency check stays cheap on a job with millions of rows.
 - Unit coverage for paged/idempotent matching and chunked clearing.
 
+### Safety
+- The paged match is **retry-safe**: a replayed batch (after a crashed worker)
+  removes and re-records only its own file ids — never rows a later page wrote
+  — and the matched totals are recomputed from the recorded rows at the end
+  rather than incremented per batch, so a replay can neither drop nor inflate
+  them.
+- A job can no longer be **edited while it is running or clearing**, so a paged
+  match can't record some pages with the old criteria and later pages with an
+  edited definition.
+
 ### Note
 - Extract (download) jobs already cap each packing run by batch size; their
   *matching* phase is not yet paged (duplicate-collapsing across pages needs

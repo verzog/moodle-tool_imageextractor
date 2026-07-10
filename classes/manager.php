@@ -691,22 +691,24 @@ class manager {
     }
 
     /**
-     * Add to a job's running matched-file totals. Used while matching pages the
-     * file table, so the counts climb as each batch is prepared.
+     * Set a job's matched-file totals from the item rows it actually holds.
+     * Called once matching is complete rather than incrementing per page, so a
+     * retried or forked match batch (which re-inserts the same rows
+     * idempotently) cannot inflate the totals.
      *
      * @param int $jobid
-     * @param int $matched Files matched in this batch.
-     * @param int $bytes Total size of those files.
      * @return void
      */
-    public static function bump_totals(int $jobid, int $matched, int $bytes): void {
+    public static function recount_totals(int $jobid): void {
         global $DB;
-        $DB->execute(
-            'UPDATE {tool_imageextractor_job}
-                SET totalmatched = totalmatched + :m, totalbytes = totalbytes + :b
-              WHERE id = :id',
-            ['m' => $matched, 'b' => $bytes, 'id' => $jobid]
+        $rec = $DB->get_record_sql(
+            'SELECT COUNT(*) AS cnt, COALESCE(SUM(filesize), 0) AS bytes
+               FROM {tool_imageextractor_item}
+              WHERE jobid = :jobid',
+            ['jobid' => $jobid]
         );
+        $DB->set_field('tool_imageextractor_job', 'totalmatched', (int) ($rec->cnt ?? 0), ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'totalbytes', (int) ($rec->bytes ?? 0), ['id' => $jobid]);
     }
 
     /**

@@ -225,6 +225,51 @@ final class replacer_test extends \advanced_testcase {
         // Replaying the same page from the same cursor must not add a duplicate.
         $replacer->prepare_page(0, 50);
         $this->assertSame(1, $DB->count_records('tool_imageextractor_item', ['jobid' => $job->id]));
+
+        // And the totals, set from the recorded rows, are not inflated by the
+        // replay - they reflect the one real target, not two.
+        manager::recount_totals($job->id);
+        $this->assertSame(1, (int) manager::get_job($job->id)->totalmatched);
+    }
+
+    /**
+     * Replaying an earlier match page (as a crash-retry would) removes and
+     * re-records only that page's own file ids - it must not wipe the rows a
+     * later page has already written.
+     */
+    public function test_prepare_page_replay_keeps_later_pages(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $contextid = \context_course::instance($this->getDataGenerator()->create_course()->id)->id;
+        $fs = get_file_storage();
+        for ($i = 1; $i <= 4; $i++) {
+            $fs->create_file_from_string([
+                'contextid' => $contextid,
+                'component' => 'mod_label',
+                'filearea'  => 'intro',
+                'itemid'    => 0,
+                'filepath'  => '/',
+                'filename'  => "img{$i}.png",
+            ], "content-{$i}");
+        }
+
+        $job = $this->make_replace_job(
+            ['imageonly' => true, 'component' => 'mod_label', 'filearea' => 'intro'],
+            'NEW'
+        );
+        $replacer = new replacer($job);
+
+        $a = $replacer->prepare_page(0, 2);
+        $this->assertSame(2, $a['matched']);
+        $b = $replacer->prepare_page($a['lastid'], 2);
+        $this->assertSame(2, $b['matched']);
+        $this->assertSame(4, $DB->count_records('tool_imageextractor_item', ['jobid' => $job->id]));
+
+        // Replay the first page: it must touch only its own two file ids, so all
+        // four rows remain (a broad "fileid > cursor" delete would drop page B).
+        $replacer->prepare_page(0, 2);
+        $this->assertSame(4, $DB->count_records('tool_imageextractor_item', ['jobid' => $job->id]));
     }
 
     /**

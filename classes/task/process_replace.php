@@ -133,13 +133,13 @@ class process_replace extends \core\task\adhoc_task {
             if ($phase === 'match') {
                 $curid = (int) ($data->curid ?? 0);
                 $page = $replacer->prepare_page($curid, $batch);
-                if ($page['matched']) {
-                    manager::bump_totals($jobid, $page['matched'], $page['bytes']);
-                }
                 if (!$page['exhausted']) {
                     $this->requeue(['jobid' => $jobid, 'op' => $op, 'phase' => 'match', 'curid' => $page['lastid']]);
                     return;
                 }
+                // Matching is complete: set the totals from the rows actually
+                // recorded (retry-safe - a replayed page cannot inflate them).
+                manager::recount_totals($jobid);
                 $matched = (int) $DB->get_field('tool_imageextractor_job', 'totalmatched', ['id' => $jobid]);
                 if ($op === 'analyse') {
                     $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_REVIEW, ['id' => $jobid]);
