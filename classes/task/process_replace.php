@@ -83,13 +83,14 @@ class process_replace extends \core\task\adhoc_task {
 
         try {
             $replacer = new replacer($job);
+            $batch = manager::batch_size();
 
             if ($op === 'restore') {
-                $remaining = $replacer->restore_batch(manager::batch_size());
+                $remaining = $replacer->restore_batch($batch);
                 mtrace('tool_imageextractor: replace job ' . $jobid . ' restored a batch, ' .
                     $remaining . ' remaining');
                 if ($remaining > 0) {
-                    $this->requeue($jobid, 'restore');
+                    $this->requeue(['jobid' => $jobid, 'op' => 'restore']);
                 } else {
                     $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_COMPLETED, ['id' => $jobid]);
                     $DB->set_field('tool_imageextractor_job', 'timecompleted', time(), ['id' => $jobid]);
@@ -98,52 +99,66 @@ class process_replace extends \core\task\adhoc_task {
                 return;
             }
 
-            if ($op === 'analyse') {
-                // Analyse phase: match the targets and resolve replacements in
-                // the background, then park the job for admin review. Nothing
-                // is replaced until the review is confirmed (op=apply).
-                mtrace('tool_imageextractor: analysing replace job ' . $jobid . ' ("' . $job->name . '")');
+            // Analyse and direct apply share a paced clear -> match progression,
+            // one bounded batch per run so a large job never pins the database.
+            // Analyse then parks for review; apply then replaces. A reviewed
+            // apply skips straight to applying its already-prepared targets.
+            $phase = (string) ($data->phase ?? '');
+            if ($phase === '') {
                 $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_PROCESSING, ['id' => $jobid]);
                 $DB->set_field('tool_imageextractor_job', 'timestarted', time(), ['id' => $jobid]);
-                // Clear any previous analysis here rather than in the web
-                // request that queued us - on a large site that delete runs for
-                // minutes. This also gives idempotency: a retried analyse (e.g.
-                // after an interrupted run) cannot duplicate the partial
-                // attempt's targets. Only pending targets exist at analyse time,
-                // so nothing restorable is discarded.
-                manager::clear_results($jobid);
-                $replacer->prepare();
-                $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_REVIEW, ['id' => $jobid]);
-                $matched = $DB->get_field('tool_imageextractor_job', 'totalmatched', ['id' => $jobid]);
-                mtrace('tool_imageextractor: replace job ' . $jobid . ' analysed, ' .
-                    $matched . ' targets matched; awaiting review');
+                // A reviewed apply already has its targets prepared and must not
+                // re-clear or re-match - it just replaces them. Every other run
+                // starts from the clear phase.
+                $hasitems = $DB->record_exists('tool_imageextractor_item', ['jobid' => $jobid]);
+                $reviewedapply = ($op === 'apply' && !$clearfirst && $hasitems);
+                $phase = $reviewedapply ? 'apply' : 'clear';
+            }
+
+            if ($phase === 'clear') {
+                $remaining = manager::clear_chunk($jobid, $batch);
+                if ($remaining > 0) {
+                    mtrace('tool_imageextractor: replace job ' . $jobid .
+                        ' clearing previous results, ' . $remaining . ' item rows left');
+                    $this->requeue(['jobid' => $jobid, 'op' => $op, 'phase' => 'clear']);
+                    return;
+                }
+                // Items gone; drop the bounded outputs, zero the counters, match.
+                manager::clear_outputs($jobid);
+                mtrace('tool_imageextractor: matching replace job ' . $jobid . ' ("' . $job->name . '")');
+                $this->requeue(['jobid' => $jobid, 'op' => $op, 'phase' => 'match', 'curid' => 0]);
                 return;
             }
 
-            if ($job->status === manager::STATUS_QUEUED) {
-                $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_PROCESSING, ['id' => $jobid]);
-                $DB->set_field('tool_imageextractor_job', 'timestarted', time(), ['id' => $jobid]);
-                // A fresh direct apply clears any stale results here (deferred
-                // off the web request); a reviewed apply must not, so its
-                // prepared targets survive to be applied.
-                if ($clearfirst) {
-                    manager::clear_results($jobid);
+            if ($phase === 'match') {
+                $curid = (int) ($data->curid ?? 0);
+                $page = $replacer->prepare_page($curid, $batch);
+                if ($page['matched']) {
+                    manager::bump_totals($jobid, $page['matched'], $page['bytes']);
                 }
-                // A reviewed job already has its targets prepared by the
-                // analyse phase; only prepare here when applying directly
-                // (e.g. from the CLI) so targets are never duplicated.
-                if (!$DB->record_exists('tool_imageextractor_item', ['jobid' => $jobid])) {
-                    mtrace('tool_imageextractor: preparing replace job ' . $jobid . ' ("' . $job->name . '")');
-                    $replacer->prepare();
+                if (!$page['exhausted']) {
+                    $this->requeue(['jobid' => $jobid, 'op' => $op, 'phase' => 'match', 'curid' => $page['lastid']]);
+                    return;
                 }
+                $matched = (int) $DB->get_field('tool_imageextractor_job', 'totalmatched', ['id' => $jobid]);
+                if ($op === 'analyse') {
+                    $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_REVIEW, ['id' => $jobid]);
+                    mtrace('tool_imageextractor: replace job ' . $jobid . ' analysed, ' .
+                        $matched . ' targets matched; awaiting review');
+                    return;
+                }
+                mtrace('tool_imageextractor: replace job ' . $jobid . ' matched ' .
+                    $matched . ' targets; applying');
+                $this->requeue(['jobid' => $jobid, 'op' => 'apply', 'phase' => 'apply']);
+                return;
             }
 
-            $remaining = $replacer->apply_batch(manager::batch_size());
+            // phase 'apply'.
+            $remaining = $replacer->apply_batch($batch);
             mtrace('tool_imageextractor: replace job ' . $jobid . ' processed a batch, ' .
                 $remaining . ' remaining');
-
             if ($remaining > 0) {
-                $this->requeue($jobid, 'apply');
+                $this->requeue(['jobid' => $jobid, 'op' => 'apply', 'phase' => 'apply']);
             } else {
                 $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_COMPLETED, ['id' => $jobid]);
                 $DB->set_field('tool_imageextractor_job', 'timecompleted', time(), ['id' => $jobid]);
@@ -157,18 +172,17 @@ class process_replace extends \core\task\adhoc_task {
     }
 
     /**
-     * Queue another run of this task for the same job.
+     * Queue another run of this task for the same job, carrying its phase and
+     * cursor. The next run is paced a little into the future so the database is
+     * left idle between bursts - otherwise one cron run grinds through every
+     * batch back-to-back and starves the rest of the site on a small server.
      *
-     * @param int $jobid
-     * @param string $op
+     * @param array $customdata Custom data for the next run (jobid, op, phase, curid).
      * @return void
      */
-    protected function requeue(int $jobid, string $op) {
+    protected function requeue(array $customdata) {
         $task = new process_replace();
-        $task->set_custom_data(['jobid' => $jobid, 'op' => $op]);
-        // Pace the next batch a little into the future so the database is left
-        // idle between bursts - otherwise one cron run grinds through every
-        // batch back-to-back and starves the rest of the site on a small server.
+        $task->set_custom_data($customdata);
         $delay = manager::throttle_delay();
         if ($delay > 0) {
             $task->set_next_run_time(time() + $delay);

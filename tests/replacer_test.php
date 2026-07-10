@@ -193,6 +193,41 @@ final class replacer_test extends \advanced_testcase {
     }
 
     /**
+     * Re-recording the same matching page (as a crash-retry would) does not
+     * duplicate item rows: the page first clears anything at or beyond its
+     * cursor. This keeps the throttled, paged matching safe to retry.
+     */
+    public function test_prepare_page_is_idempotent(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course();
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_course::instance($course->id)->id,
+            'component' => 'mod_label',
+            'filearea'  => 'intro',
+            'itemid'    => 0,
+            'filepath'  => '/',
+            'filename'  => 'logo.png',
+        ], 'OLD');
+
+        $job = $this->make_replace_job(
+            ['imageonly' => true, 'component' => 'mod_label', 'filearea' => 'intro'],
+            'NEW'
+        );
+        $replacer = new replacer($job);
+
+        $first = $replacer->prepare_page(0, 50);
+        $this->assertSame(1, $first['matched']);
+        $this->assertTrue($first['exhausted']);
+        $this->assertSame(1, $DB->count_records('tool_imageextractor_item', ['jobid' => $job->id]));
+
+        // Replaying the same page from the same cursor must not add a duplicate.
+        $replacer->prepare_page(0, 50);
+        $this->assertSame(1, $DB->count_records('tool_imageextractor_item', ['jobid' => $job->id]));
+    }
+
+    /**
      * Missing-only mode targets only files whose content is gone.
      */
     public function test_missing_only(): void {

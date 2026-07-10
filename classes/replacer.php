@@ -146,29 +146,66 @@ class replacer {
     }
 
     /**
-     * Match target files and create one item row per target.
+     * Match target files and create one item row per target, in one pass.
+     *
+     * Kept for the CLI and tests; the cron path uses prepare_page() so the
+     * match is spread across throttled batches. This resets the running totals
+     * and pages through the whole match itself.
      *
      * @return void
      */
     public function prepare() {
+        manager::zero_counters((int) $this->job->id);
+        $after = 0;
+        do {
+            $page = $this->prepare_page($after, 1000);
+            manager::bump_totals((int) $this->job->id, $page['matched'], $page['bytes']);
+            $after = $page['lastid'];
+        } while (!$page['exhausted']);
+    }
+
+    /**
+     * Match and record one keyset page of target files, resuming after the
+     * given file id. Returns the cursor to continue from, how many targets were
+     * recorded, their total size, and whether the scan is exhausted.
+     *
+     * The caller is responsible for the running totals (bump_totals) and for
+     * having cleared prior results; this only inserts the page's item rows.
+     * Any rows from a partially-completed later page (file id beyond the cursor)
+     * are removed first, so a retried run cannot duplicate targets.
+     *
+     * @param int $afterid Cursor file id (0 to start).
+     * @param int $limit Maximum files to record this page.
+     * @return array ['lastid' => int, 'matched' => int, 'bytes' => int, 'exhausted' => bool]
+     */
+    public function prepare_page(int $afterid, int $limit): array {
         global $DB;
 
+        // Idempotency: drop anything a crashed previous attempt may have written
+        // for this page or beyond before re-recording it.
+        $DB->delete_records_select(
+            'tool_imageextractor_item',
+            'jobid = :jobid AND fileid > :afterid',
+            ['jobid' => (int) $this->job->id, 'afterid' => $afterid]
+        );
+
+        // Unordered keyset by file id: replace targets every match, so no
+        // hash-sorting is needed and each page streams straight from the index.
         $matcher = new matcher(manager::decode_criteria($this->job), false);
-        // Unordered: extract needs hash-sorted rows to collapse duplicates,
-        // but replace targets every match, and the sort forces the database
-        // to materialise the whole matched set before streaming starts.
-        $rs = $matcher->get_recordset(false);
+        $rows = $matcher->get_page($afterid, '', $limit, false);
         $missingonly = !empty($this->job->missingonly);
 
-        $count = 0;
+        $matched = 0;
         $bytes = 0;
         $batch = [];
+        $lastid = $afterid;
 
-        foreach ($rs as $file) {
+        foreach ($rows as $file) {
+            $lastid = (int) $file->id;
+
             // In "missing only" mode we keep just the broken files. Only that
             // mode needs the stored_file hydrated (one extra query per row);
-            // the matcher's WHERE already excludes directories and empty
-            // rows, and apply re-checks each target when it runs.
+            // the matcher's WHERE already excludes directories and empty rows.
             if ($missingonly) {
                 $stored = $this->fs->get_file_by_id((int) $file->id);
                 if (!$stored || !self::content_missing($stored)) {
@@ -208,21 +245,19 @@ class replacer {
             $item->timeprocessed = 0;
             $batch[] = $item;
 
-            $count++;
+            $matched++;
             $bytes += (int) $file->filesize;
-
-            if (count($batch) >= 1000) {
-                $DB->insert_records('tool_imageextractor_item', $batch);
-                $batch = [];
-            }
         }
         if ($batch) {
             $DB->insert_records('tool_imageextractor_item', $batch);
         }
-        $rs->close();
 
-        $DB->set_field('tool_imageextractor_job', 'totalmatched', $count, ['id' => $this->job->id]);
-        $DB->set_field('tool_imageextractor_job', 'totalbytes', $bytes, ['id' => $this->job->id]);
+        return [
+            'lastid'    => $lastid,
+            'matched'   => $matched,
+            'bytes'     => $bytes,
+            'exhausted' => count($rows) < $limit,
+        ];
     }
 
     /**

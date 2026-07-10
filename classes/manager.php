@@ -657,6 +657,59 @@ class manager {
     }
 
     /**
+     * Remove up to $limit of a job's item rows (and their per-item backup
+     * files), returning how many item rows remain. Deleting in bounded chunks
+     * across cron runs keeps a millions-row clear from pinning the database in
+     * one pass. The caller clears the (bounded) outputs once the items are gone.
+     *
+     * @param int $jobid
+     * @param int $limit Maximum item rows to delete this chunk.
+     * @return int Item rows still remaining for the job.
+     */
+    public static function clear_chunk(int $jobid, int $limit): int {
+        global $DB;
+        $fs = get_file_storage();
+        $context = self::context();
+
+        $ids = array_keys($DB->get_records(
+            'tool_imageextractor_item',
+            ['jobid' => $jobid],
+            'id ASC',
+            'id',
+            0,
+            $limit
+        ));
+        if ($ids) {
+            // Backups are stored under each item's id; remove this chunk's in
+            // one set-based pass, then the item rows themselves.
+            [$insql, $inparams] = $DB->get_in_or_equal($ids, SQL_PARAMS_NAMED, 'bkid');
+            $fs->delete_area_files_select($context->id, self::COMPONENT, 'backup', $insql, $inparams);
+            $DB->delete_records_list('tool_imageextractor_item', 'id', $ids);
+        }
+
+        return $DB->count_records('tool_imageextractor_item', ['jobid' => $jobid]);
+    }
+
+    /**
+     * Add to a job's running matched-file totals. Used while matching pages the
+     * file table, so the counts climb as each batch is prepared.
+     *
+     * @param int $jobid
+     * @param int $matched Files matched in this batch.
+     * @param int $bytes Total size of those files.
+     * @return void
+     */
+    public static function bump_totals(int $jobid, int $matched, int $bytes): void {
+        global $DB;
+        $DB->execute(
+            'UPDATE {tool_imageextractor_job}
+                SET totalmatched = totalmatched + :m, totalbytes = totalbytes + :b
+              WHERE id = :id',
+            ['m' => $matched, 'b' => $bytes, 'id' => $jobid]
+        );
+    }
+
+    /**
      * Remove a job's generated outputs - the ZIP volumes, their rows, the
      * manifest - and zero its counters, without touching the (potentially huge)
      * item rows or per-item backups. These artifacts are few and bounded (one

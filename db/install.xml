@@ -69,6 +69,7 @@
       </KEYS>
       <INDEXES>
         <INDEX NAME="jobid-status" UNIQUE="false" FIELDS="jobid, status"/>
+        <INDEX NAME="jobid-fileid" UNIQUE="false" FIELDS="jobid, fileid"/>
       </INDEXES>
     </TABLE>
     <TABLE NAME="tool_imageextractor_volume" COMMENT="One generated ZIP volume for a job.">

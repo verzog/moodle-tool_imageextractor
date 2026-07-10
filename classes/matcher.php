@@ -340,4 +340,47 @@ class matcher {
 {$orderby}";
         return $DB->get_recordset_sql($sql, $params);
     }
+
+    /**
+     * Fetch one keyset page of matched file rows after a cursor, so a large
+     * match can be processed a bounded batch per cron run instead of scanning
+     * the whole file table in a single pass.
+     *
+     * The cursor is the last row returned by the previous page. When $ordered
+     * (extract's duplicate collapsing) the keyset is (contenthash, id) so the
+     * hash grouping the caller relies on is preserved across pages; otherwise
+     * it is just id. A short page (fewer than $limit rows) means the scan is
+     * exhausted.
+     *
+     * @param int $afterid Cursor file id (0 to start).
+     * @param string $afterhash Cursor content hash ('' to start); used only when $ordered.
+     * @param int $limit Maximum rows to return.
+     * @param bool $ordered Order by (contenthash, id) for duplicate collapsing.
+     * @return array Rows keyed by file id, in scan order.
+     */
+    public function get_page(int $afterid, string $afterhash, int $limit, bool $ordered): array {
+        global $DB;
+        [$where, $params] = $this->get_where();
+
+        if ($ordered) {
+            // Resume strictly after the (contenthash, id) cursor.
+            $where .= ' AND (f.contenthash > :cah1 OR (f.contenthash = :cah2 AND f.id > :caid))';
+            $params['cah1'] = $afterhash;
+            $params['cah2'] = $afterhash;
+            $params['caid'] = $afterid;
+            $orderby = 'ORDER BY f.contenthash, f.id';
+        } else {
+            $where .= ' AND f.id > :caid';
+            $params['caid'] = $afterid;
+            $orderby = 'ORDER BY f.id';
+        }
+
+        $sql = "SELECT f.id, f.contenthash, f.filename, f.filepath, f.filesize, f.mimetype,
+                       f.contextid, f.component, f.filearea, f.itemid, f.userid,
+                       f.timecreated, f.author, f.license
+                  FROM {files} f
+                 WHERE $where
+                 $orderby";
+        return $DB->get_records_sql($sql, $params, 0, $limit);
+    }
 }
