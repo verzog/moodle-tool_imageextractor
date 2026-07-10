@@ -153,7 +153,7 @@ class process_replace extends \core\task\adhoc_task {
                 return;
             }
 
-            // phase 'apply'.
+            // Phase 'apply': replace the prepared targets a batch at a time.
             $remaining = $replacer->apply_batch($batch);
             mtrace('tool_imageextractor: replace job ' . $jobid . ' processed a batch, ' .
                 $remaining . ' remaining');
