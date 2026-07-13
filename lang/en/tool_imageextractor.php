@@ -59,6 +59,7 @@ $string['csvunknowncourse'] = 'CSV: could not match a course for "{$a}" - row sk
 $string['csvunknownuser'] = 'CSV: could not match a user for "{$a}" - row skipped.';
 $string['datefrom'] = 'Created on or after';
 $string['dateto'] = 'Created on or before';
+$string['deletequeued'] = 'Deletion queued. The job\'s results are being removed in the background and the job will disappear from the list shortly.';
 $string['disabledretry'] = 'Image extractor is disabled; the job will resume automatically once it is re-enabled.';
 $string['disabledwarning'] = 'The image extractor is currently disabled in the plugin settings. Jobs cannot run until it is re-enabled.';
 $string['downloads'] = 'Downloads';

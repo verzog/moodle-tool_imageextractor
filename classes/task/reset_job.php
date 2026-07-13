@@ -55,6 +55,9 @@ class reset_job extends \core\task\adhoc_task {
         if ($jobid <= 0) {
             return;
         }
+        // A deferred delete_job() clears the same way but removes the job
+        // definition at the end instead of returning it to draft.
+        $thendelete = !empty($data->thendelete);
 
         $job = $DB->get_record('tool_imageextractor_job', ['id' => $jobid]);
         if (!$job) {
@@ -78,12 +81,18 @@ class reset_job extends \core\task\adhoc_task {
         $remaining = manager::clear_chunk($jobid, manager::batch_size());
         if ($remaining > 0) {
             mtrace('tool_imageextractor: clearing job ' . $jobid . ', ' . $remaining . ' item rows left');
-            $this->requeue($jobid);
+            $this->requeue($jobid, $thendelete);
             return;
         }
 
-        // Items gone; remove the bounded outputs and return the job to draft.
+        // Items gone; remove the bounded outputs, then finish the delete or
+        // return the job to draft.
         manager::clear_outputs($jobid);
+        if ($thendelete) {
+            manager::delete_job($jobid);
+            mtrace('tool_imageextractor: job ' . $jobid . ' deleted');
+            return;
+        }
         manager::mark_draft($jobid);
         mtrace('tool_imageextractor: job ' . $jobid . ' reset to draft');
     }
@@ -93,11 +102,12 @@ class reset_job extends \core\task\adhoc_task {
      * left idle between bursts.
      *
      * @param int $jobid
+     * @param bool $thendelete Whether to delete the job once cleared.
      * @return void
      */
-    protected function requeue(int $jobid) {
+    protected function requeue(int $jobid, bool $thendelete = false) {
         $task = new reset_job();
-        $task->set_custom_data(['jobid' => $jobid]);
+        $task->set_custom_data(['jobid' => $jobid, 'thendelete' => $thendelete]);
         $delay = manager::throttle_delay();
         if ($delay > 0) {
             $task->set_next_run_time(time() + $delay);

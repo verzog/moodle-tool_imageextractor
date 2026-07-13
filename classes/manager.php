@@ -872,18 +872,41 @@ class manager {
     }
 
     /**
-     * Delete a job entirely, including its definition and all files.
+     * Delete a job entirely, including its definition and all files. If the job
+     * holds prepared item rows - potentially millions, whose deletion (with
+     * their backup files) can exceed the gateway timeout - the removal is
+     * deferred to the same chunked background task "Clear results" uses, which
+     * deletes the job definition once the items are gone; the job is parked in
+     * the "clearing" state meanwhile. A job with nothing heavy to remove is
+     * deleted inline.
      *
      * @param int $jobid
-     * @return void
+     * @return bool True if the deletion was deferred to a background task.
      */
-    public static function delete_job(int $jobid): void {
+    public static function delete_job(int $jobid): bool {
         global $DB;
-        self::clear_results($jobid);
         $fs = get_file_storage();
-        $fs->delete_area_files(self::context()->id, self::COMPONENT, 'csv', $jobid);
-        $fs->delete_area_files(self::context()->id, self::COMPONENT, 'replacement', $jobid);
+        $context = self::context();
+
+        // The bounded, user-visible pieces (outputs, CSV, replacement source)
+        // are removed now either way, so the job stops serving downloads the
+        // instant it is deleted.
+        self::clear_outputs($jobid);
+        $fs->delete_area_files($context->id, self::COMPONENT, 'csv', $jobid);
+        $fs->delete_area_files($context->id, self::COMPONENT, 'replacement', $jobid);
+
+        if ($DB->record_exists('tool_imageextractor_item', ['jobid' => $jobid])) {
+            $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_CLEARING, ['id' => $jobid]);
+            $DB->set_field('tool_imageextractor_job', 'error', null, ['id' => $jobid]);
+            $task = new task\reset_job();
+            $task->set_custom_data(['jobid' => $jobid, 'thendelete' => true]);
+            \core\task\manager::queue_adhoc_task($task, true);
+            return true;
+        }
+
+        $DB->delete_records('tool_imageextractor_item', ['jobid' => $jobid]);
         $DB->delete_records('tool_imageextractor_job', ['id' => $jobid]);
+        return false;
     }
 
     /**
