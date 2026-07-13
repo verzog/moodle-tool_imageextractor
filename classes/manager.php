@@ -687,10 +687,15 @@ class manager {
         // totalmatched already gives the headline count, and no caller needs a
         // live per-status breakdown here (the replace/skip split is only known
         // at apply time).
+        //
+        // No ORDER BY: sorting by id could force PostgreSQL to sort the whole
+        // jobid partition before applying the LIMIT (the jobid index does not
+        // order by id). The sample is illustrative, so any 50 rows the jobid
+        // index yields first are fine, and the query stays O(samplelimit).
         $rows = array_values($DB->get_records(
             'tool_imageextractor_item',
             ['jobid' => $jobid],
-            'id ASC',
+            '',
             'id, contextid, component, filearea, fileitemid, filepath, filename, mimetype, filesize, replacementname',
             0,
             $samplelimit
