@@ -6,7 +6,7 @@ and either **exporting** them (with metadata and naming rules) or
 sets (50 GB or more) by doing all heavy work in throttled, resumable background
 tasks.
 
-**Status:** beta (release `0.12.0-beta`). Feature-complete and CI-tested; suitable
+**Status:** beta (release `0.13.0-beta`). Feature-complete and CI-tested; suitable
 for testing on non-production sites. See [`CHANGELOG.md`](CHANGELOG.md) for the
 release history.
 
@@ -21,7 +21,6 @@ release history.
     are selected wherever they are; the criteria fields are ignored), or
   - **per-row criteria**, where each row is its own search specification.
 - **Naming rules** with placeholders (e.g. `{courseshortname}_{seq}_{originalname}`).
-- Optional de-duplication so each image is exported only once.
 - Output is split into capped-size **ZIP volumes** so each archive can be
   downloaded through a browser, accompanied by a master **manifest CSV** and a
   per-image **JSON sidecar** of metadata.
@@ -74,28 +73,35 @@ complete the installation.
 
 ## Usage
 
-Go to _Site administration > Plugins > Admin tools > Image extractor_. Create a
-job — one form covers both job types, with a selector at the top for
-**Extract** (download images as ZIP archives) or **Replace** (upload
-replacement content); only the sections relevant to the chosen type are
-shown. Review the estimated match count, then run it. While editing an extract
-job, a **live estimate** of the approximate match count and total size updates
-as you change the criteria (course, category, MIME type, size, and so on); if
-JavaScript is unavailable, press **Estimate matches** for the same figure via a
-page reload. Either way the estimate reflects the criteria fields only and
-ignores CSV refinement. Background tasks run on cron, so ensure cron is configured.
-Download the generated ZIP volumes and manifest from the job's view page.
+Go to _Site administration > Plugins > Admin tools > Image extractor_. The flow
+is **select → analyse → results → extract or replace**:
 
-Running a replace job from the web happens in two phases, and is restricted to
-site administrators. Run first queues a background **analyse** pass that
-matches the targets and resolves their replacements without changing anything
-(so even huge sites cannot time out the page). The job then shows **Awaiting
-review**: the job page presents an exact preview — how many files will be
-replaced or skipped, a sample, and a **thumbnail preview of the first few
-targets with the current image and its replacement side by side** — and a
-final "are you sure" confirmation.
-Only confirming that review queues the destructive apply phase; "Clear
-results" discards the analysis instead.
+1. **Create a job** describing only which files it selects — a name, the search
+   criteria (course, category, component, file area, MIME type, filename
+   pattern, size, date), an optional CSV, and the "only broken or missing
+   files" refinement. No extract/replace choice is made here.
+2. **Analyse** it from the job page. The matcher runs in the background (paged
+   and throttled, so even huge sites cannot time out the page) and records the
+   matched files. The job then shows **Results ready**.
+3. **Review the results.** The job page shows how many files matched and their
+   total size, a sample table, and thumbnails of the matched originals, with
+   two action panels below.
+4. **Choose an action:**
+   - **Extract (download)** — set a naming rule and volume size and press
+     _Download / Extract_. The matched files are packed into ZIP volumes with a
+     manifest, which you download from the job page once packing finishes.
+   - **Replace (upload)** — offered only to site administrators with the replace
+     feature enabled. Upload a single replacement image or a ZIP matched by
+     filename, choose whether to back up originals, and continue. A final
+     screen shows a **thumbnail comparison of the current image and its
+     replacement side by side** and an "are you sure" confirmation before the
+     destructive apply is queued. Targets with no matching replacement are
+     skipped.
+
+Background tasks run on cron, so ensure cron is configured.
+
+> **Note:** per-content-hash de-duplication is temporarily not applied — every
+> matched file is packed. Restoring it (at pack time) is a planned follow-up.
 
 Removing a previous run's results — whether by Run, Analyse, "Clear results"
 or editing the job — never happens in the web request: on a large site that

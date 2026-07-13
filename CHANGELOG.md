@@ -6,6 +6,52 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.13.0-beta] — 2026-07-13
+
+Build `2026071000`.
+
+### Changed
+- **One unified flow: select → analyse → results → extract or replace.** The
+  extract-versus-replace choice is no longer made up front. A job is now
+  created **criteria-only** (name, description, file-selection criteria, CSV
+  mode and the "only broken or missing files" refinement). You press
+  **Analyse** to run the existing paged, throttled matcher, which records the
+  matched files as **type-agnostic** item rows (no replacement is resolved and
+  no output name is computed at match time). The job then shows **Results
+  ready**, and the job page presents the matched count and size, a sample and
+  thumbnails of the matched originals, and two action panels:
+  - **Extract** — a naming rule and volume size, then *Download / Extract*.
+    Choosing it packs the **already-matched** items into ZIP volumes, computing
+    each output name at pack time; the packing task no longer re-matches.
+  - **Replace** — shown only to a site administrator with the replace feature
+    enabled (enforced server-side): the replacement source (single image or ZIP)
+    and a "back up originals" option. Choosing it stores the source and shows
+    the existing old-vs-new thumbnail comparison and final "are you sure"
+    confirmation before the destructive apply is queued. Replacements are
+    resolved (and targets with no match **skipped**) at apply time.
+- The job form is now **criteria-only**: the type selector, the output/naming
+  and replacement sections and their `tool_imageextractor/jobtype` toggling are
+  gone. A new job's `jobtype` is stored empty until an action is chosen.
+- New form classes `extract_form` and `replace_form` back the two results-page
+  panels; the previous `job_form` replace/output sections are removed.
+- The `jobtype` column default changes from `extract` to empty (an `upgrade.php`
+  step adjusts it). Existing jobs keep their stored type and continue to work.
+
+### Removed
+- **The live "Estimate matches" web service and its form field are gone.** The
+  synchronous all-files count could time out on large sites, and the analyse
+  pass now reports exact totals instead. Deleted the `estimate_matches`
+  external function and its `db/services.php` entry, the
+  `tool_imageextractor/estimate` and `tool_imageextractor/jobtype` AMD modules
+  (and built artifacts), and the now-unused language strings.
+
+### Note
+- **Per-content-hash de-duplication is temporarily not applied.** The old
+  extract collapsed duplicate content hashes during its hash-ordered prepare,
+  but the unified, type-agnostic match cannot do that, so for now every matched
+  item is packed. Restoring de-duplication (at pack time) is a planned
+  follow-up. The `dedupe` UI control and handling have been removed.
+
 ## [0.12.0-beta] — 2026-07-10
 
 Build `2026070907`.
@@ -348,6 +394,7 @@ Build `2026062702`. Initial release.
 - GitHub Actions CI matrix across PHP 8.2–8.4, Moodle 5.0–5.2, PostgreSQL and
   MariaDB.
 
+[0.13.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.12.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.11.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
 [0.10.0-beta]: https://github.com/verzog/moodle-tool_imageextractor
