@@ -6,11 +6,9 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
-## [0.13.1-beta] — 2026-07-13
+## [0.13.2-beta] — 2026-07-13
 
-Build `2026071001`.
-
-Follow-up fixes addressing review of the unified extract/replace flow.
+Build `2026071002`.
 
 ### Fixed
 - **The results and replace-confirmation pages could time out on a large job,
@@ -21,7 +19,16 @@ Follow-up fixes addressing review of the unified extract/replace flow.
   seconds — long enough to hit the gateway timeout before the task was queued.
   The counts were not used by either page (both show the stored `totalmatched`
   and a 50-row sample), so they are gone: the review now reads only the bounded
-  sample, with no aggregate over the item table.
+  sample. The sample query also drops its `ORDER BY id`, so it can never sort
+  the whole jobid partition before applying the `LIMIT`.
+
+## [0.13.1-beta] — 2026-07-13
+
+Build `2026071001`.
+
+Follow-up fixes addressing review of the unified extract/replace flow.
+
+### Fixed
 - A **"broken or missing files"** analysis can no longer be extracted: its
   files are selected because their content is unreadable, so packing them only
   re-fails. The results page hides the Extract panel and explains that such a

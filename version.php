@@ -22,8 +22,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'tool_imageextractor';
-$plugin->version   = 2026071001;
+$plugin->version   = 2026071002;
 $plugin->requires  = 2025041400; // Moodle 5.0.
 $plugin->supported = [500, 502];
 $plugin->maturity  = MATURITY_BETA;
-$plugin->release   = '0.13.1-beta (Build 2026071001)';
+$plugin->release   = '0.13.2-beta (Build 2026071002)';
