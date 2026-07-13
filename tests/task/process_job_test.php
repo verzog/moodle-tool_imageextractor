@@ -192,6 +192,113 @@ final class process_job_test extends \advanced_testcase {
     }
 
     /**
+     * The analysed match records courseid=0 and a blank course shortname
+     * (type-agnostic). Packing must resolve the real course and persist it, so
+     * the item rows - and therefore the manifest and JSON sidecars - carry the
+     * true course details rather than 0/blank.
+     */
+    public function test_extract_records_course_details(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->expectOutputRegex('/tool_imageextractor:/');
+        set_config('enabled', 1, 'tool_imageextractor');
+        set_config('throttle_delay', 0, 'tool_imageextractor');
+
+        $course = $this->getDataGenerator()->create_course(['shortname' => 'BIO101']);
+        $contextid = \context_course::instance($course->id)->id;
+        $fs = get_file_storage();
+        for ($i = 0; $i < 2; $i++) {
+            $fs->create_file_from_string([
+                'contextid' => $contextid,
+                'component' => 'mod_label',
+                'filearea'  => 'intro',
+                'itemid'    => 0,
+                'filepath'  => '/',
+                'filename'  => "pic{$i}.png",
+            ], "png-body-{$i}");
+        }
+
+        $job = $this->make_draft_job();
+        manager::queue_analyse($job->id);
+        $this->drain(process_replace::class);
+
+        // The type-agnostic analyse leaves the course unset.
+        $pending = $DB->get_records('tool_imageextractor_item', ['jobid' => $job->id]);
+        foreach ($pending as $item) {
+            $this->assertSame(0, (int) $item->courseid);
+            $this->assertSame('', (string) $item->courseshortname);
+        }
+
+        manager::set_extract_action($job->id, '{originalname}', 2048);
+        manager::queue_extract($job->id);
+        $this->drain(process_job::class);
+
+        // Packing resolves and persists the real course onto each item.
+        $done = $DB->get_records('tool_imageextractor_item', ['jobid' => $job->id, 'status' => 'done']);
+        $this->assertCount(2, $done);
+        foreach ($done as $item) {
+            $this->assertSame((int) $course->id, (int) $item->courseid);
+            $this->assertSame('BIO101', (string) $item->courseshortname);
+        }
+
+        // The manifest, generated from the item rows, therefore shows it too.
+        $manifest = $fs->get_file(
+            \context_system::instance()->id,
+            manager::COMPONENT,
+            'manifest',
+            $job->id,
+            '/',
+            'manifest.csv'
+        );
+        $this->assertNotFalse($manifest);
+        $this->assertStringContainsString('BIO101', $manifest->get_content());
+    }
+
+    /**
+     * A criteria-only job driven straight to extraction (the CLI/direct path
+     * via queue_job) must pack every matched item, not collapse duplicate
+     * content hashes - matching the web analyse->extract path. queue_job turns
+     * de-duplication off even if the stored default left it on.
+     */
+    public function test_direct_extract_does_not_dedupe(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->expectOutputRegex('/tool_imageextractor:/');
+        set_config('enabled', 1, 'tool_imageextractor');
+        set_config('throttle_delay', 0, 'tool_imageextractor');
+
+        // Two files with identical content share a content hash; with dedupe on
+        // the old prepare would collapse them to one.
+        $course = $this->getDataGenerator()->create_course();
+        $contextid = \context_course::instance($course->id)->id;
+        $fs = get_file_storage();
+        foreach (['a.png', 'b.png'] as $name) {
+            $fs->create_file_from_string([
+                'contextid' => $contextid,
+                'component' => 'mod_label',
+                'filearea'  => 'intro',
+                'itemid'    => 0,
+                'filepath'  => '/',
+                'filename'  => $name,
+            ], 'identical-content');
+        }
+
+        $job = $this->make_draft_job();
+        // Simulate the stored dedupe default the direct path must override.
+        $DB->set_field('tool_imageextractor_job', 'dedupe', 1, ['id' => $job->id]);
+
+        manager::queue_job($job->id);
+        $this->drain(process_job::class);
+
+        $job = manager::get_job($job->id);
+        $this->assertSame('extract', $job->jobtype);
+        $this->assertSame(0, (int) $job->dedupe);
+        // Both duplicate-content files were packed; neither was deduped away.
+        $this->assertSame(2, (int) $job->totalmatched);
+        $this->assertSame(2, (int) $job->processedcount);
+    }
+
+    /**
      * A single extract run packs at most one batch of files into a volume, even
      * when the volume-size cap is far from reached, leaving the rest pending for
      * the next (paced) run.

@@ -456,6 +456,24 @@ class manager {
 
         // Single mode: keep just the one uploaded replacement image.
         if (isset($data->replacementfile)) {
+            // An existing single-mode replace job can be re-submitted reusing
+            // its stored source with an empty filepicker (the results-page form
+            // waives the upload requirement then). Saving that empty draft would
+            // wipe the stored image and leave the apply phase nothing to replace
+            // with, so only overwrite when the draft actually carries a file.
+            $usercontext = \context_user::instance($USER->id);
+            $draftfiles = $fs->get_area_files(
+                $usercontext->id,
+                'user',
+                'draft',
+                (int) $data->replacementfile,
+                'id',
+                false
+            );
+            $stored = $fs->get_area_files($context->id, self::COMPONENT, 'replacement', $jobid, 'id', false);
+            if (empty($draftfiles) && !empty($stored)) {
+                return;
+            }
             file_save_draft_area_files(
                 (int) $data->replacementfile,
                 $context->id,
@@ -494,6 +512,13 @@ class manager {
         global $DB;
 
         $job = self::get_job($jobid);
+        // Per-row-criteria CSV jobs must never be applied as a replace, from the
+        // results page (which also hides the option) or the CLI/direct queue
+        // path. Each CSV row widens the destructive selection, which is too easy
+        // to get wrong to allow for a replace.
+        if ($job->jobtype === 'replace' && $job->csvmode === 'criteria') {
+            throw new \moodle_exception('errorcsvcriteriareplace', 'tool_imageextractor');
+        }
         // Re-running a replace job clears results, which would discard the
         // backups of the previous run's originals. Refuse until they have been
         // restored or explicitly cleared, so originals can never be stranded.
@@ -541,6 +566,12 @@ class manager {
         if ($job->jobtype === '') {
             $DB->set_field('tool_imageextractor_job', 'jobtype', 'extract', ['id' => $jobid]);
         }
+        // The unified flow no longer exposes de-duplication and is meant to pack
+        // every matched item, so normalise dedupe off for any direct extract run
+        // reaching here - a fresh criteria-only job, or an existing/upgraded
+        // extract job re-run through the CLI whose stored dedupe may still be 1 -
+        // matching the web analyse->extract path (which never re-matches).
+        $DB->set_field('tool_imageextractor_job', 'dedupe', 0, ['id' => $jobid]);
         $task = new task\process_job();
         $task->set_custom_data(['jobid' => $jobid, 'clearfirst' => true]);
         \core\task\manager::queue_adhoc_task($task, true);

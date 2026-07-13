@@ -116,11 +116,19 @@ function tool_imageextractor_render_replace_preview(stdClass $job, moodle_url $v
 
     $review = \tool_imageextractor\manager::review_summary((int) $job->id);
     echo $OUTPUT->heading(get_string('replacepreviewheading', 'tool_imageextractor'), 3);
-    echo html_writer::div(get_string('reviewsummary', 'tool_imageextractor', (object) [
-        'total'       => $review['total'],
-        'willreplace' => $review['willreplace'],
-        'willskip'    => $review['willskip'],
-    ]), 'mb-2');
+    // Report only the total matched, not an exact replace/skip split: the
+    // replacement is resolved at apply time, so every matched row still counts
+    // as pending here and an exact "all will be replaced" headline would
+    // over-state a ZIP that does not cover every filename.
+    echo html_writer::div(
+        get_string('reviewsummarytotal', 'tool_imageextractor', $review['total']),
+        'mb-2'
+    );
+    // Single mode writes the one image over every target (nothing is skipped),
+    // so only ZIP mode needs the "unmatched filenames are skipped" caveat.
+    if ($job->replacemode === 'zip') {
+        echo $OUTPUT->notification(get_string('replacezipskipnote', 'tool_imageextractor'), 'info');
+    }
 
     $replacer = new \tool_imageextractor\replacer($job);
     $thumbrows = array_slice($review['rows'], 0, 5);

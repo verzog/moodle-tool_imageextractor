@@ -55,6 +55,14 @@ $isreview = ($job->status === manager::STATUS_REVIEW);
 // site administrators with the feature switched on; the panel and every action
 // handler below enforce this rule server-side.
 $allowreplace = manager::is_replace_allowed() && is_siteadmin();
+// A missing-only analysis selects files precisely because their content is
+// broken or unreadable, so packing them would only re-fail: no Extract panel
+// for those jobs (they can still be replaced or restored).
+$canextract = empty($job->missingonly);
+// Per-row-criteria CSV jobs stay extract-only: each row widens the destructive
+// selection, which is too easy to get wrong for a replace. Enforced here (panel
+// hidden) and again in every replace action handler below.
+$replaceallowed = $allowreplace && $job->csvmode !== 'criteria';
 
 // The results page presents the extract and replace action panels. They are
 // built whenever the job is awaiting an action so their submissions can be
@@ -62,10 +70,41 @@ $allowreplace = manager::is_replace_allowed() && is_siteadmin();
 $extractform = null;
 $replaceform = null;
 if ($isreview) {
-    $extractform = new extract_form($viewurl->out(false), ['id' => $id]);
-    $extractform->set_data(['id' => $id]);
-    if ($allowreplace) {
-        $replaceform = new replace_form($viewurl->out(false), ['id' => $id]);
+    if ($canextract) {
+        $extractform = new extract_form($viewurl->out(false), ['id' => $id]);
+        // Seed the panel from the job's stored options only when it already has
+        // an extract action chosen, so an existing or upgraded extract job shows
+        // its own naming rule and volume size. A freshly analysed criteria-only
+        // job (jobtype '') carries just the schema defaults, not admin choices,
+        // so seeding them would override extract_form's configured defaults
+        // (e.g. a site's custom default volume size) - leave those to the form.
+        $extractdata = ['id' => $id];
+        if ($job->jobtype === 'extract') {
+            if ((string) $job->namingrule !== '') {
+                $extractdata['namingrule'] = $job->namingrule;
+            }
+            if ((int) $job->volumesize > 0) {
+                $extractdata['volumemb'] = (int) round($job->volumesize / 1024 / 1024);
+            }
+        }
+        $extractform->set_data($extractdata);
+    }
+    if ($replaceallowed) {
+        // Let an existing/upgraded replace job that already has a stored source
+        // for the chosen mode reuse it instead of demanding a fresh upload.
+        $hasstoredsource = (bool) get_file_storage()->get_area_files(
+            $context->id,
+            manager::COMPONENT,
+            'replacement',
+            $id,
+            'id',
+            false
+        );
+        $replaceform = new replace_form($viewurl->out(false), [
+            'id'                => $id,
+            'storedreplacemode' => $job->replacemode,
+            'hasstoredsource'   => $hasstoredsource,
+        ]);
         $replaceform->set_data(['id' => $id]);
     }
 }
@@ -88,6 +127,10 @@ if ($extractform && ($data = $extractform->get_data())) {
 if ($replaceform && ($data = $replaceform->get_data())) {
     if (!manager::is_enabled() || !manager::is_replace_allowed() || !is_siteadmin()) {
         \core\notification::error(get_string('replaceadminonly', 'tool_imageextractor'));
+        redirect($viewurl);
+    }
+    if ($job->csvmode === 'criteria') {
+        \core\notification::error(get_string('errorcsvcriteriareplace', 'tool_imageextractor'));
         redirect($viewurl);
     }
     manager::set_replace_action($id, $data);
@@ -124,6 +167,10 @@ if ($action !== '' && confirm_sesskey()) {
             \core\notification::error(get_string('replaceadminonly', 'tool_imageextractor'));
             redirect($viewurl);
         }
+        if ($job->csvmode === 'criteria') {
+            \core\notification::error(get_string('errorcsvcriteriareplace', 'tool_imageextractor'));
+            redirect($viewurl);
+        }
         echo $OUTPUT->header();
         echo $OUTPUT->notification(get_string('replacewarning', 'tool_imageextractor'), 'error');
         tool_imageextractor_render_replace_preview($job, $viewurl);
@@ -140,6 +187,10 @@ if ($action !== '' && confirm_sesskey()) {
     if ($action === 'replacerun' && $confirm && $isreview && $isreplace) {
         if (!manager::is_enabled() || !manager::is_replace_allowed() || !is_siteadmin()) {
             \core\notification::error(get_string('replaceadminonly', 'tool_imageextractor'));
+            redirect($viewurl);
+        }
+        if ($job->csvmode === 'criteria') {
+            \core\notification::error(get_string('errorcsvcriteriareplace', 'tool_imageextractor'));
             redirect($viewurl);
         }
         manager::queue_job($id);
@@ -321,9 +372,13 @@ if ($isreview) {
     }
 
     // Action panels.
-    echo $OUTPUT->heading(get_string('extractpanelheading', 'tool_imageextractor'), 4);
-    echo html_writer::div(get_string('extractpanelintro', 'tool_imageextractor'), 'mb-2');
-    $extractform->display();
+    if ($extractform) {
+        echo $OUTPUT->heading(get_string('extractpanelheading', 'tool_imageextractor'), 4);
+        echo html_writer::div(get_string('extractpanelintro', 'tool_imageextractor'), 'mb-2');
+        $extractform->display();
+    } else if ($job->missingonly) {
+        echo $OUTPUT->notification(get_string('extractmissingonlynote', 'tool_imageextractor'), 'info');
+    }
 
     if ($replaceform) {
         echo $OUTPUT->heading(get_string('replacepanelheading', 'tool_imageextractor'), 4);
