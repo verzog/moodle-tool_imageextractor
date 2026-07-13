@@ -99,6 +99,100 @@ function tool_imageextractor_progress_bar(int $done, int $total): string {
 }
 
 /**
+ * Render the destructive-replace confirmation preview for a job: a side-by-side
+ * thumbnail comparison of the first few matched targets with the replacement
+ * that will be written, followed by a sample table naming each resolved
+ * replacement (or flagging targets with no match). Replacements are resolved
+ * through the same path the apply uses, so the preview links the exact file
+ * that will be written.
+ *
+ * @param stdClass $job The replace job (its replacement source is stored).
+ * @param moodle_url $viewurl The job view URL (unused placeholder for symmetry).
+ * @return void
+ */
+function tool_imageextractor_render_replace_preview(stdClass $job, moodle_url $viewurl): void {
+    global $OUTPUT;
+    unset($viewurl);
+
+    $review = \tool_imageextractor\manager::review_summary((int) $job->id);
+    echo $OUTPUT->heading(get_string('replacepreviewheading', 'tool_imageextractor'), 3);
+    echo html_writer::div(get_string('reviewsummary', 'tool_imageextractor', (object) [
+        'total'       => $review['total'],
+        'willreplace' => $review['willreplace'],
+        'willskip'    => $review['willskip'],
+    ]), 'mb-2');
+
+    $replacer = new \tool_imageextractor\replacer($job);
+    $thumbrows = array_slice($review['rows'], 0, 5);
+    if ($thumbrows) {
+        echo $OUTPUT->heading(get_string('previewthumbsheading', 'tool_imageextractor'), 4);
+        $ttable = new html_table();
+        $ttable->attributes['class'] = 'generaltable';
+        $ttable->head = [
+            get_string('colcurrentimage', 'tool_imageextractor'),
+            get_string('colreplacementimage', 'tool_imageextractor'),
+            get_string('colfilename', 'tool_imageextractor'),
+        ];
+        foreach ($thumbrows as $prow) {
+            $oldurl = null;
+            if (strpos((string) $prow->mimetype, 'image/') === 0) {
+                $oldurl = moodle_url::make_pluginfile_url(
+                    $prow->contextid,
+                    $prow->component,
+                    $prow->filearea,
+                    $prow->fileitemid,
+                    $prow->filepath,
+                    $prow->filename
+                );
+            }
+            $newurl = null;
+            $replacementfile = $replacer->replacement_for($prow->filename);
+            if ($replacementfile) {
+                $newurl = moodle_url::make_pluginfile_url(
+                    $replacementfile->get_contextid(),
+                    $replacementfile->get_component(),
+                    $replacementfile->get_filearea(),
+                    $replacementfile->get_itemid(),
+                    $replacementfile->get_filepath(),
+                    $replacementfile->get_filename()
+                );
+            }
+            $ttable->data[] = [
+                tool_imageextractor_thumbnail($oldurl, get_string('colcurrentimage', 'tool_imageextractor')),
+                tool_imageextractor_thumbnail($newurl, get_string('colreplacementimage', 'tool_imageextractor')),
+                s($prow->filename),
+            ];
+        }
+        echo html_writer::table($ttable);
+    }
+
+    if ($review['rows']) {
+        $ptable = new html_table();
+        $ptable->attributes['class'] = 'generaltable';
+        $ptable->head = [
+            get_string('colfilename', 'tool_imageextractor'),
+            get_string('component', 'tool_imageextractor'),
+            get_string('filearea', 'tool_imageextractor'),
+            get_string('colsize', 'tool_imageextractor'),
+            get_string('replacement', 'tool_imageextractor'),
+        ];
+        foreach ($review['rows'] as $prow) {
+            $resolved = $replacer->replacement_for($prow->filename);
+            $ptable->data[] = [
+                s($prow->filename),
+                s($prow->component),
+                s($prow->filearea),
+                display_size((int) $prow->filesize),
+                $resolved
+                    ? s($resolved->get_filename())
+                    : html_writer::tag('em', get_string('replacenomatchcell', 'tool_imageextractor')),
+            ];
+        }
+        echo html_writer::table($ptable);
+    }
+}
+
+/**
  * Render one thumbnail cell for the replace review preview: a small, capped
  * image when a URL is given, or a muted placeholder when there is nothing to
  * show (a non-image target, or an item with no matching replacement).

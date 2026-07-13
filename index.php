@@ -42,20 +42,13 @@ if (!manager::is_enabled()) {
     echo $OUTPUT->notification(get_string('disabledwarning', 'tool_imageextractor'), 'warning');
 }
 
+// A job is created criteria-only; the extract or replace action is chosen
+// later from its results page, so there is a single "New job" entry point.
 $buttons = $OUTPUT->single_button(
-    new moodle_url('/admin/tool/imageextractor/edit.php', ['type' => 'extract']),
+    new moodle_url('/admin/tool/imageextractor/edit.php'),
     get_string('newjob', 'tool_imageextractor'),
     'get'
 );
-// Replace jobs are restricted to site administrators (edit.php enforces the
-// same rule), so only offer the entry point where it can actually be used.
-if (manager::is_replace_allowed() && is_siteadmin()) {
-    $buttons .= ' ' . $OUTPUT->single_button(
-        new moodle_url('/admin/tool/imageextractor/edit.php', ['type' => 'replace']),
-        get_string('newreplacejob', 'tool_imageextractor'),
-        'get'
-    );
-}
 echo html_writer::div($buttons, 'mb-3');
 
 $jobs = manager::get_jobs();
@@ -84,7 +77,7 @@ foreach ($jobs as $job) {
     if ($job->status === manager::STATUS_CLEARING) {
         // Results are being removed in the background; no meaningful progress.
         $progress = get_string('clearing', 'tool_imageextractor');
-    } else if ($job->jobtype === 'replace' && $isrunning && (int) $job->totalmatched === 0) {
+    } else if ($isrunning && (int) $job->totalmatched === 0) {
         // The analyse phase has no totals until it finishes.
         $progress = get_string('analysing', 'tool_imageextractor');
     } else {
@@ -96,9 +89,12 @@ foreach ($jobs as $job) {
     $actions = html_writer::link($viewurl, get_string('view'))
         . ' | ' . html_writer::link($editurl, get_string('edit'));
 
+    $jobtypelabel = $job->jobtype !== ''
+        ? get_string('jobtype_' . $job->jobtype, 'tool_imageextractor')
+        : get_string('jobtype_unset', 'tool_imageextractor');
     $table->data[] = [
         html_writer::link($viewurl, format_string($job->name)),
-        get_string('jobtype_' . $job->jobtype, 'tool_imageextractor'),
+        $jobtypelabel,
         $statuslabel,
         $progress,
         userdate($job->timecreated),
