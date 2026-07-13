@@ -6,6 +6,22 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.13.2-beta] — 2026-07-13
+
+Build `2026071002`.
+
+### Fixed
+- **The results and replace-confirmation pages could time out on a large job,
+  so the extract/replace action never queued.** `review_summary()` counted the
+  `pending` and `skipped` item rows on every load, but immediately after analyse
+  those millions of rows are freshly inserted and unvacuumed, so PostgreSQL
+  cannot answer the count from the index alone and scans the heap for tens of
+  seconds — long enough to hit the gateway timeout before the task was queued.
+  The counts were not used by either page (both show the stored `totalmatched`
+  and a 50-row sample), so they are gone: the review now reads only the bounded
+  sample. The sample query also drops its `ORDER BY id`, so it can never sort
+  the whole jobid partition before applying the `LIMIT`.
+
 ## [0.13.1-beta] — 2026-07-13
 
 Build `2026071001`.

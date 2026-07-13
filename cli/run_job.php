@@ -126,13 +126,16 @@ if ($isreplace && !manager::is_replace_allowed()) {
 if (empty($options['execute'])) {
     if ($isreplace) {
         if ($job->status === manager::STATUS_REVIEW) {
-            // Already analysed (via the web Run button): report the exact
-            // stored breakdown instead of re-scanning the file table.
+            // Already analysed (via the web Run button): report the stored total
+            // instead of re-scanning the file table. The replace/skip split is
+            // resolved per target at apply time, not counted here (counting the
+            // freshly analysed item table would scan millions of unvacuumed rows
+            // and stall), so report the total and how the split is decided.
             $review = manager::review_summary($jobid);
             cli_writeln("Replace job #{$jobid} \"{$job->name}\" (analysed, awaiting review):");
             cli_writeln("  matched by criteria: {$review['total']}");
-            cli_writeln("  {$review['willreplace']} will be replaced, "
-                . "{$review['willskip']} skipped (no replacement)");
+            cli_writeln("  each target's replacement is resolved at apply time; "
+                . "targets with no matching replacement are skipped then.");
         } else {
             $preview = (new replacer($job))->preview();
             cli_writeln("Replace job #{$jobid} \"{$job->name}\" (dry run):");
