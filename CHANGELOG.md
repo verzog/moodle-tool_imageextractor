@@ -6,6 +6,35 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.13.1-beta] — 2026-07-13
+
+Build `2026071001`.
+
+Follow-up fixes addressing review of the unified extract/replace flow.
+
+### Fixed
+- A **"broken or missing files"** analysis can no longer be extracted: its
+  files are selected because their content is unreadable, so packing them only
+  re-fails. The results page hides the Extract panel and explains that such a
+  selection can be replaced or restored, not extracted.
+- **Per-row-criteria CSV jobs cannot be replaced** (they stay extract-only, as
+  before the unified flow): the Replace panel is hidden and every replace action
+  handler rejects them server-side.
+- The **ZIP replace confirmation** no longer implies every matched file will be
+  replaced; it now notes that targets whose filename has no matching entry in
+  the uploaded ZIP are skipped at apply time. Single-image replacements still
+  replace every target.
+- The Extract panel is now **seeded from the job's stored naming rule and volume
+  size**, so an existing extract job shows its own options rather than the site
+  defaults.
+- An existing replace job with a **stored replacement source** for its chosen
+  mode reuses it instead of demanding a fresh upload; new jobs still require one.
+- The **direct (CLI) extract path** no longer de-duplicates, matching the web
+  analyse → extract path.
+- JSON sidecars and the manifest again record the real **course id and short
+  name** for each analysed extract (the type-agnostic match records neither, so
+  the course is now resolved when the file is packed).
+
 ## [0.13.0-beta] — 2026-07-13
 
 Build `2026071000`.

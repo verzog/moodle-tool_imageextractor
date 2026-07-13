@@ -229,9 +229,10 @@ class process_job extends \core\task\adhoc_task {
         // A volume is its own ZIP, so output names only need to be unique within
         // it; this map guards against two files in this volume colliding.
         $seen = [];
-        // Names computed this run, keyed by item id, persisted alongside the
-        // done status so the manifest reports the packed name.
-        $names = [];
+        // Per-item fields computed this run (packed name and resolved course),
+        // keyed by item id and persisted alongside the done status so the
+        // manifest and sidecar report what actually went into the archive.
+        $persist = [];
         // Sequence numbers continue after everything packed in earlier volumes.
         $seqbase = (int) $job->processedcount;
         // Bound this run by file count as well as volume size. Each file costs
@@ -263,6 +264,13 @@ class process_job extends \core\task\adhoc_task {
                 continue;
             }
 
+            // The type-agnostic match records courseid=0 and a blank course
+            // shortname; resolve the real course now (cached) so the sidecar
+            // and manifest carry it rather than 0/blank.
+            $courseinfo = $this->resolve_course((int) $item->contextid);
+            $item->courseid = (int) $courseinfo->courseid;
+            $item->courseshortname = $courseinfo->shortname;
+
             // The type-agnostic match left the output name blank; compute it now
             // from the job's naming rule and the item's stored fields (the same
             // placeholders as before). A pre-computed name (the CLI path) is
@@ -270,7 +278,12 @@ class process_job extends \core\task\adhoc_task {
             $outputname = $item->outputname !== '' ? $item->outputname
                 : naming::ensure_unique($this->render_name($job, $item, $seqbase + count($doneids) + 1), $seen);
             $item->outputname = $outputname;
-            $names[(int) $item->id] = $outputname;
+            $persist[(int) $item->id] = (object) [
+                'id'              => (int) $item->id,
+                'outputname'      => $outputname,
+                'courseid'        => $item->courseid,
+                'courseshortname' => $item->courseshortname,
+            ];
 
             $entry = 'images/' . $outputname;
             $archivefiles[$entry] = $stored;
@@ -336,10 +349,11 @@ class process_job extends \core\task\adhoc_task {
         }
 
         if ($doneids) {
-            // Persist the name each file was packed under so the manifest and
-            // the sidecar reflect what actually went into the archive.
-            foreach ($names as $itemid => $outputname) {
-                $DB->set_field('tool_imageextractor_item', 'outputname', $outputname, ['id' => $itemid]);
+            // Persist the packed name and the resolved course for each file so
+            // the manifest and the sidecar reflect what actually went into the
+            // archive.
+            foreach ($persist as $rec) {
+                $DB->update_record('tool_imageextractor_item', $rec);
             }
             $this->mark_items($doneids, 'done', $sequence, $now);
             $DB->execute(

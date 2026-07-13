@@ -32,7 +32,9 @@ require_once($CFG->libdir . '/formslib.php');
  * feature enabled; the results page enforces the same rule server-side.
  *
  * Expected custom data:
- * - id (int) The job id.
+ * - id (int)                    The job id.
+ * - storedreplacemode (string) Replace mode that already has a stored source.
+ * - hasstoredsource   (bool)   Whether a replacement source is already stored.
  */
 class replace_form extends \moodleform {
     /**
@@ -91,13 +93,21 @@ class replace_form extends \moodleform {
     public function validation($data, $files) {
         $errors = parent::validation($data, $files);
 
+        // A replacement source is required, unless the job already has a stored
+        // source FOR THE SELECTED MODE (an existing/upgraded replace job).
+        // Switching, say, single -> zip without uploading a new archive must
+        // not pass, or the job would run against the stale source (or nothing).
         $mode = $data['replacemode'] ?? 'single';
+        $storedmode = $this->_customdata['storedreplacemode'] ?? '';
+        $hasstoredsource = !empty($this->_customdata['hasstoredsource']);
+        $hasstored = $hasstoredsource && $mode === $storedmode;
+
         if ($mode === 'zip') {
-            if (!$this->get_new_filename('replacementzip')) {
+            if (!$this->get_new_filename('replacementzip') && !$hasstored) {
                 $errors['replacementzip'] = get_string('errornoreplacement', 'tool_imageextractor');
             }
         } else {
-            if (!$this->get_new_filename('replacementfile')) {
+            if (!$this->get_new_filename('replacementfile') && !$hasstored) {
                 $errors['replacementfile'] = get_string('errornoreplacement', 'tool_imageextractor');
             }
         }

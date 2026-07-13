@@ -537,9 +537,12 @@ class manager {
 
         // A criteria-only job driven straight to extraction (the CLI path,
         // which cannot upload a replacement) becomes an extract job: the
-        // packing task matches and packs it in one shot.
+        // packing task matches and packs it in one shot. Turn off de-duplication
+        // so the direct path packs every matched item, matching the web
+        // analyse->extract path (this flow intentionally does not de-duplicate).
         if ($job->jobtype === '') {
             $DB->set_field('tool_imageextractor_job', 'jobtype', 'extract', ['id' => $jobid]);
+            $DB->set_field('tool_imageextractor_job', 'dedupe', 0, ['id' => $jobid]);
         }
         $task = new task\process_job();
         $task->set_custom_data(['jobid' => $jobid, 'clearfirst' => true]);
