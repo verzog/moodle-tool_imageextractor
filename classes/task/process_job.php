@@ -439,7 +439,7 @@ class process_job extends \core\task\adhoc_task {
             'filesize', 'mimetype', 'component', 'filearea', 'fileitemid',
             'contextid', 'courseid', 'courseshortname', 'uploaderid',
             'filetimecreated', 'status',
-        ]);
+        ], ',', '"', '\\');
 
         $rs = $DB->get_recordset('tool_imageextractor_item', ['jobid' => $job->id], 'volume ASC, id ASC');
         foreach ($rs as $item) {
@@ -460,7 +460,7 @@ class process_job extends \core\task\adhoc_task {
                 $item->uploaderid,
                 $item->filetimecreated ? userdate($item->filetimecreated) : '',
                 $item->status,
-            ]);
+            ], ',', '"', '\\');
         }
         $rs->close();
         fclose($handle);
