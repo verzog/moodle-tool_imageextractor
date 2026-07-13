@@ -166,13 +166,14 @@ final class process_replace_test extends \advanced_testcase {
         $this->assertSame(manager::STATUS_REVIEW, $job->status);
         $this->assertSame(1, (int) $job->totalmatched);
 
-        // The analysis materialised the target with its resolved replacement,
-        // but nothing has been replaced yet.
+        // The analysis materialised the target as a type-agnostic pending item:
+        // no replacement is resolved at match time (that happens at apply), and
+        // nothing has been replaced yet.
         $items = $DB->get_records('tool_imageextractor_item', ['jobid' => $job->id]);
         $this->assertCount(1, $items);
         $item = reset($items);
         $this->assertSame('pending', $item->status);
-        $this->assertSame('new.png', $item->replacementname);
+        $this->assertNull($item->replacementname);
         $this->assertSame('OLD', $this->content_at($target));
 
         // The review summary reads the stored breakdown.
@@ -200,6 +201,10 @@ final class process_replace_test extends \advanced_testcase {
         $this->assertSame('NEW', $this->content_at($target));
         // Applying must consume the analysed targets, not re-prepare them.
         $this->assertSame(1, $DB->count_records('tool_imageextractor_item', ['jobid' => $job->id]));
+        // Apply resolved the replacement per item and recorded its name.
+        $item = $DB->get_record('tool_imageextractor_item', ['jobid' => $job->id]);
+        $this->assertSame('done', $item->status);
+        $this->assertSame('new.png', $item->replacementname);
     }
 
     /**
@@ -252,6 +257,48 @@ final class process_replace_test extends \advanced_testcase {
         $job = manager::get_job($job->id);
         $this->assertSame(0, (int) $job->totalmatched);
         $this->assertSame(0, $DB->count_records('tool_imageextractor_item', ['jobid' => $job->id]));
+    }
+
+    /**
+     * A target with no matching replacement is skipped (not failed) at apply
+     * time, and its content is left untouched.
+     */
+    public function test_apply_skips_target_without_replacement(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->expectOutputRegex('/tool_imageextractor:/');
+        $this->enable_plugin();
+
+        $target = $this->make_target('OLD');
+        $job = $this->make_replace_job('IGNORED');
+        // Switch to ZIP mode and store an entry that does NOT match the target
+        // filename, so resolution at apply finds nothing.
+        $DB->set_field('tool_imageextractor_job', 'replacemode', 'zip', ['id' => $job->id]);
+        $context = \context_system::instance();
+        get_file_storage()->delete_area_files($context->id, manager::COMPONENT, 'replacement', $job->id);
+        get_file_storage()->create_file_from_string([
+            'contextid' => $context->id,
+            'component' => manager::COMPONENT,
+            'filearea'  => 'replacement',
+            'itemid'    => $job->id,
+            'filepath'  => '/',
+            'filename'  => 'unrelated.png',
+        ], 'ZIP');
+
+        manager::queue_analyse($job->id);
+        $this->drain_tasks();
+        $this->assertSame(manager::STATUS_REVIEW, manager::get_job($job->id)->status);
+
+        manager::queue_job($job->id);
+        $this->drain_tasks();
+
+        $job = manager::get_job($job->id);
+        $this->assertSame(manager::STATUS_COMPLETED, $job->status);
+        // The target had no matching replacement, so it was skipped, not failed,
+        // and its content is unchanged.
+        $item = $DB->get_record('tool_imageextractor_item', ['jobid' => $job->id]);
+        $this->assertSame('skipped', $item->status);
+        $this->assertSame('OLD', $this->content_at($target));
     }
 
     /**

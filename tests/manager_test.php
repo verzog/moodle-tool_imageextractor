@@ -42,7 +42,6 @@ final class manager_test extends \advanced_testcase {
 
         $data = (object) [
             'name'        => 'Scoped job',
-            'jobtype'     => 'extract',
             // Duplicates and a 0 (the site course) must be cleaned out.
             'courseids'   => [$courseone->id, $coursetwo->id, $courseone->id, 0],
             'categoryids' => [$category->id, $category->id],
@@ -54,7 +53,9 @@ final class manager_test extends \advanced_testcase {
 
         $this->assertSame([(int) $courseone->id, (int) $coursetwo->id], $criteria['courseids']);
         $this->assertSame([(int) $category->id], $criteria['categoryids']);
-        $this->assertSame('extract', $job->jobtype);
+        // A new job is criteria-only: its type is unset until an action is
+        // chosen from the results page.
+        $this->assertSame('', $job->jobtype);
     }
 
     /**
@@ -66,8 +67,7 @@ final class manager_test extends \advanced_testcase {
         $this->setAdminUser();
 
         $data = (object) [
-            'name'    => 'Unscoped job',
-            'jobtype' => 'extract',
+            'name' => 'Unscoped job',
         ];
 
         $result = manager::save_job($data);
@@ -101,7 +101,6 @@ final class manager_test extends \advanced_testcase {
 
         $data = (object) [
             'name'      => 'Nominated files',
-            'jobtype'   => 'extract',
             'csvmode'   => 'match',
             'csvfile'   => $draftid,
             // These would silently narrow the nominated list; all ignored.
@@ -119,6 +118,69 @@ final class manager_test extends \advanced_testcase {
         $this->assertSame([], $criteria['courseids']);
         $this->assertSame([], $criteria['mimetypes']);
         $this->assertSame('', $criteria['component']);
+    }
+
+    /**
+     * Choosing the Extract action records the naming rule and volume size and
+     * sets the job's type to extract, without touching its criteria.
+     */
+    public function test_set_extract_action(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $result = manager::save_job((object) ['name' => 'To extract']);
+        $job = manager::get_job($result['id']);
+        $this->assertSame('', $job->jobtype);
+
+        manager::set_extract_action($result['id'], '{courseshortname}_{originalname}', 512);
+        $job = manager::get_job($result['id']);
+
+        $this->assertSame('extract', $job->jobtype);
+        $this->assertSame('{courseshortname}_{originalname}', $job->namingrule);
+        $this->assertSame(512 * 1024 * 1024, (int) $job->volumesize);
+    }
+
+    /**
+     * Choosing the Replace action records the mode and backup flag, stores the
+     * uploaded replacement source, and sets the job's type to replace.
+     */
+    public function test_set_replace_action(): void {
+        global $USER;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $result = manager::save_job((object) ['name' => 'To replace']);
+
+        $draftid = file_get_unused_draft_itemid();
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_user::instance($USER->id)->id,
+            'component' => 'user',
+            'filearea'  => 'draft',
+            'itemid'    => $draftid,
+            'filepath'  => '/',
+            'filename'  => 'new.png',
+        ], 'NEW');
+
+        manager::set_replace_action($result['id'], (object) [
+            'replacemode'     => 'single',
+            'backup'          => 1,
+            'replacementfile' => $draftid,
+        ]);
+        $job = manager::get_job($result['id']);
+
+        $this->assertSame('replace', $job->jobtype);
+        $this->assertSame('single', $job->replacemode);
+        $this->assertSame(1, (int) $job->backup);
+        // The replacement source is stored in the job's replacement area.
+        $stored = get_file_storage()->get_area_files(
+            \context_system::instance()->id,
+            manager::COMPONENT,
+            'replacement',
+            $result['id'],
+            'id',
+            false
+        );
+        $this->assertCount(1, $stored);
     }
 
     /**

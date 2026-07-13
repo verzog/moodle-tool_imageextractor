@@ -21,12 +21,4 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$functions = [
-    'tool_imageextractor_estimate_matches' => [
-        'classname'     => 'tool_imageextractor\\external\\estimate_matches',
-        'description'   => 'Estimate how many files (and how many bytes) match the given criteria.',
-        'type'          => 'read',
-        'ajax'          => true,
-        'capabilities'  => 'tool/imageextractor:manage',
-    ],
-];
+$functions = [];
