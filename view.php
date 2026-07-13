@@ -72,15 +72,20 @@ $replaceform = null;
 if ($isreview) {
     if ($canextract) {
         $extractform = new extract_form($viewurl->out(false), ['id' => $id]);
-        // Seed the panel from the job's stored options so an existing or
-        // upgraded extract job shows its own naming rule and volume size rather
-        // than the site defaults (which Download/Extract would then overwrite).
+        // Seed the panel from the job's stored options only when it already has
+        // an extract action chosen, so an existing or upgraded extract job shows
+        // its own naming rule and volume size. A freshly analysed criteria-only
+        // job (jobtype '') carries just the schema defaults, not admin choices,
+        // so seeding them would override extract_form's configured defaults
+        // (e.g. a site's custom default volume size) - leave those to the form.
         $extractdata = ['id' => $id];
-        if ((string) $job->namingrule !== '') {
-            $extractdata['namingrule'] = $job->namingrule;
-        }
-        if ((int) $job->volumesize > 0) {
-            $extractdata['volumemb'] = (int) round($job->volumesize / 1024 / 1024);
+        if ($job->jobtype === 'extract') {
+            if ((string) $job->namingrule !== '') {
+                $extractdata['namingrule'] = $job->namingrule;
+            }
+            if ((int) $job->volumesize > 0) {
+                $extractdata['volumemb'] = (int) round($job->volumesize / 1024 / 1024);
+            }
         }
         $extractform->set_data($extractdata);
     }

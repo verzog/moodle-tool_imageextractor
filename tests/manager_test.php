@@ -184,6 +184,94 @@ final class manager_test extends \advanced_testcase {
     }
 
     /**
+     * Re-choosing Replace on a job that already has a stored single source,
+     * without uploading a new file, keeps the stored image rather than wiping it
+     * with the empty filepicker draft (which would leave the apply phase nothing
+     * to replace with).
+     */
+    public function test_set_replace_action_reuses_stored_single_source(): void {
+        global $USER;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $result = manager::save_job((object) ['name' => 'Reuse source']);
+
+        $draftid = file_get_unused_draft_itemid();
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_user::instance($USER->id)->id,
+            'component' => 'user',
+            'filearea'  => 'draft',
+            'itemid'    => $draftid,
+            'filepath'  => '/',
+            'filename'  => 'orig.png',
+        ], 'ORIG');
+
+        // First submission stores the source.
+        manager::set_replace_action($result['id'], (object) [
+            'replacemode'     => 'single',
+            'backup'          => 1,
+            'replacementfile' => $draftid,
+        ]);
+
+        // Second submission reuses it: a fresh, empty filepicker draft.
+        $emptydraft = file_get_unused_draft_itemid();
+        manager::set_replace_action($result['id'], (object) [
+            'replacemode'     => 'single',
+            'backup'          => 1,
+            'replacementfile' => $emptydraft,
+        ]);
+
+        $stored = get_file_storage()->get_area_files(
+            \context_system::instance()->id,
+            manager::COMPONENT,
+            'replacement',
+            $result['id'],
+            'id',
+            false
+        );
+        $this->assertCount(1, $stored);
+        $this->assertSame('ORIG', reset($stored)->get_content());
+    }
+
+    /**
+     * A per-row-criteria CSV replace job is refused by the queue path itself
+     * (not just the results page), so it cannot be applied from the CLI.
+     */
+    public function test_queue_job_rejects_criteria_csv_replace(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $result = manager::save_job((object) ['name' => 'Criteria replace']);
+        $DB->set_field('tool_imageextractor_job', 'jobtype', 'replace', ['id' => $result['id']]);
+        $DB->set_field('tool_imageextractor_job', 'csvmode', 'criteria', ['id' => $result['id']]);
+
+        $this->expectException(\moodle_exception::class);
+        $this->expectExceptionMessageMatches('/criteria/i');
+        manager::queue_job($result['id']);
+    }
+
+    /**
+     * Any direct extract run through queue_job() normalises de-duplication off,
+     * even for an existing extract job whose stored dedupe flag is still 1, so
+     * the packing task packs every matched item.
+     */
+    public function test_queue_job_disables_dedupe_for_extract(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $result = manager::save_job((object) ['name' => 'Extract dedupe']);
+        // Simulate an existing/upgraded extract job carrying the old default.
+        $DB->set_field('tool_imageextractor_job', 'jobtype', 'extract', ['id' => $result['id']]);
+        $DB->set_field('tool_imageextractor_job', 'dedupe', 1, ['id' => $result['id']]);
+
+        manager::queue_job($result['id']);
+
+        $this->assertSame(0, (int) $DB->get_field('tool_imageextractor_job', 'dedupe', ['id' => $result['id']]));
+    }
+
+    /**
      * criteria_from_data maps raw form fields to criteria: kilobyte sizes are
      * converted to bytes, a comma-separated MIME list is split, and id lists
      * are cleaned - without any database access.
