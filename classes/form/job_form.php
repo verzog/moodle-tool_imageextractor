@@ -21,6 +21,8 @@
 
 namespace tool_imageextractor\form;
 
+use tool_imageextractor\manager;
+
 defined('MOODLE_INTERNAL') || die();
 
 require_once($CFG->libdir . '/formslib.php');
@@ -115,8 +117,13 @@ class job_form extends \moodleform {
 
         // Every CSV-driven mode needs a CSV; without one a match-mode job
         // would have nothing nominating its files. When editing, the stored
-        // CSV is preloaded into the draft area, which satisfies this.
-        if (($data['csvmode'] ?? 'none') !== 'none' && !$this->get_new_filename('csvfile')) {
+        // CSV is preloaded into the draft area, which satisfies this. The
+        // draft area is inspected directly, NOT via get_new_filename(): that
+        // method calls is_validated(), which runs this validation() again -
+        // infinite recursion that spins the request whenever a CSV mode is
+        // chosen.
+        $csvmodechosen = ($data['csvmode'] ?? 'none') !== 'none';
+        if ($csvmodechosen && !manager::draft_has_file((int) ($data['csvfile'] ?? 0))) {
             $errors['csvfile'] = get_string('errorcsvrequired', 'tool_imageextractor');
         }
 

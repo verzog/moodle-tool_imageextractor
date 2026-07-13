@@ -6,6 +6,25 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.13.4-beta] — 2026-07-13
+
+Build `2026071004`.
+
+### Fixed
+- **Submitting the Replace panel hung the request forever (and with it, via the
+  session lock, every other page for that user).** `replace_form::validation()`
+  checked the upload with `moodleform::get_new_filename()`, but that method
+  calls `is_validated()`, which runs `validation()` again — infinite recursion.
+  The request span on CPU until the worker was killed; with *Debug messages*
+  set to DEVELOPER the burn was amplified because every draft-area query in the
+  loop ran `debug_backtrace()` over a stack thousands of frames deep. Diagnosed
+  from a php-fpm slow-log stack trace on a live site. The job form's CSV check
+  had the same latent recursion (since the first release) whenever a CSV mode
+  was chosen. Both validations now inspect the submitted draft area directly
+  via a new recursion-safe `manager::draft_has_file()`, and mocked-submission
+  tests exercise the real validation so any regression hangs CI instead of
+  passing.
+
 ## [0.13.3-beta] — 2026-07-13
 
 Build `2026071003`.

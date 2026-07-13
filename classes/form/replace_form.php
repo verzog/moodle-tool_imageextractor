@@ -21,6 +21,8 @@
 
 namespace tool_imageextractor\form;
 
+use tool_imageextractor\manager;
+
 defined('MOODLE_INTERNAL') || die();
 
 require_once($CFG->libdir . '/formslib.php');
@@ -102,12 +104,17 @@ class replace_form extends \moodleform {
         $hasstoredsource = !empty($this->_customdata['hasstoredsource']);
         $hasstored = $hasstoredsource && $mode === $storedmode;
 
+        // The upload is checked by inspecting the submitted draft area, NOT via
+        // get_new_filename(): that method calls is_validated(), which runs this
+        // validation() again - infinite recursion that pinned the web request
+        // on CPU (and, holding the session lock, hung every other request from
+        // the same user) whenever this panel was submitted.
         if ($mode === 'zip') {
-            if (!$this->get_new_filename('replacementzip') && !$hasstored) {
+            if (!manager::draft_has_file((int) ($data['replacementzip'] ?? 0)) && !$hasstored) {
                 $errors['replacementzip'] = get_string('errornoreplacement', 'tool_imageextractor');
             }
         } else {
-            if (!$this->get_new_filename('replacementfile') && !$hasstored) {
+            if (!manager::draft_has_file((int) ($data['replacementfile'] ?? 0)) && !$hasstored) {
                 $errors['replacementfile'] = get_string('errornoreplacement', 'tool_imageextractor');
             }
         }
