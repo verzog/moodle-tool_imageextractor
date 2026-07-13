@@ -486,6 +486,29 @@ class manager {
     }
 
     /**
+     * Whether a user draft file area holds at least one file.
+     *
+     * This is the recursion-safe way for a form's validation() to check that
+     * something was uploaded. moodleform::get_new_filename() must never be
+     * called from validation(): it calls is_validated(), which runs
+     * validation() again - infinite recursion that spins the web request on
+     * CPU until the worker is killed (and, holding the session lock, stalls
+     * every other request from the same user).
+     *
+     * @param int $draftitemid The submitted filepicker value.
+     * @return bool
+     */
+    public static function draft_has_file(int $draftitemid): bool {
+        global $USER;
+        if ($draftitemid <= 0) {
+            return false;
+        }
+        $usercontext = \context_user::instance($USER->id);
+        $fs = get_file_storage();
+        return (bool) $fs->get_area_files($usercontext->id, 'user', 'draft', $draftitemid, 'id', false);
+    }
+
+    /**
      * Read the (single) CSV file from a draft area as a string.
      *
      * @param int $draftitemid
