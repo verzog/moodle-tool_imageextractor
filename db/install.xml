@@ -8,7 +8,7 @@
         <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
         <FIELD NAME="name" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="description" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
-        <FIELD NAME="jobtype" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="Empty until an action is chosen, then extract or replace."/>
+        <FIELD NAME="jobtype" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="extract" SEQUENCE="false" COMMENT="Empty until an action is chosen (set explicitly on create), then extract or replace."/>
         <FIELD NAME="status" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="draft" SEQUENCE="false"/>
         <FIELD NAME="criteria" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="JSON-encoded search criteria, including any CSV-derived lists."/>
         <FIELD NAME="csvmode" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="none" SEQUENCE="false"/>

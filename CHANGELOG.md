@@ -34,8 +34,9 @@ Build `2026071000`.
   gone. A new job's `jobtype` is stored empty until an action is chosen.
 - New form classes `extract_form` and `replace_form` back the two results-page
   panels; the previous `job_form` replace/output sections are removed.
-- The `jobtype` column default changes from `extract` to empty (an `upgrade.php`
-  step adjusts it). Existing jobs keep their stored type and continue to work.
+- A new job stores an empty `jobtype` (set explicitly when it is created) until
+  an action is chosen; the column keeps its schema default and existing jobs
+  keep their stored type and continue to work.
 
 ### Removed
 - **The live "Estimate matches" web service and its form field are gone.** The

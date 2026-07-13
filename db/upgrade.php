@@ -41,16 +41,5 @@ function xmldb_tool_imageextractor_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026070907, 'tool', 'imageextractor');
     }
 
-    if ($oldversion < 2026071000) {
-        // A job is now created criteria-only, with its extract/replace action
-        // chosen later from the results page, so a new job's type is genuinely
-        // unset. Change the column default from "extract" to an empty string.
-        // Existing jobs keep their stored type and continue to work.
-        $table = new xmldb_table('tool_imageextractor_job');
-        $field = new xmldb_field('jobtype', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, '', 'description');
-        $dbman->change_field_default($table, $field);
-        upgrade_plugin_savepoint(true, 2026071000, 'tool', 'imageextractor');
-    }
-
     return true;
 }
