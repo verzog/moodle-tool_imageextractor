@@ -225,8 +225,13 @@ if ($action !== '' && confirm_sesskey()) {
 
     if ($action === 'delete') {
         if ($confirm) {
-            manager::delete_job($id);
-            \core\notification::success(get_string('jobdeleted', 'tool_imageextractor'));
+            // A job holding millions of item rows is deleted in the background
+            // so this request cannot time out; a light one is deleted inline.
+            $deferred = manager::delete_job($id);
+            \core\notification::success(get_string(
+                $deferred ? 'deletequeued' : 'jobdeleted',
+                'tool_imageextractor'
+            ));
             redirect($indexurl);
         }
         echo $OUTPUT->header();

@@ -6,6 +6,20 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.13.3-beta] — 2026-07-13
+
+Build `2026071003`.
+
+### Fixed
+- **Deleting a job with a large analysis could time out the web request.**
+  Delete removed every prepared item row (and any per-item backups) in one
+  synchronous pass — the last remaining unbounded operation on a web request.
+  It now works like "Clear results": the bounded pieces (downloads, CSV,
+  replacement source) are removed immediately, the job is parked as *Clearing*,
+  and the existing chunked, throttled background task removes the item rows
+  across cron runs and then deletes the job definition. A job with nothing
+  heavy to remove is still deleted inline.
+
 ## [0.13.2-beta] — 2026-07-13
 
 Build `2026071002`.

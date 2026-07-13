@@ -272,6 +272,53 @@ final class manager_test extends \advanced_testcase {
     }
 
     /**
+     * Deleting a job with no prepared items removes it inline.
+     */
+    public function test_delete_job_inline_when_light(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $result = manager::save_job((object) ['name' => 'Light delete']);
+
+        $this->assertFalse(manager::delete_job($result['id']));
+        $this->assertFalse($DB->record_exists('tool_imageextractor_job', ['id' => $result['id']]));
+    }
+
+    /**
+     * Deleting a job that holds prepared item rows is deferred: the web request
+     * only parks the job as clearing (deleting millions of rows inline would
+     * time out), and the background task chunks through the items before
+     * removing the job definition.
+     */
+    public function test_delete_job_defers_heavy_clear(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $result = manager::save_job((object) ['name' => 'Heavy delete']);
+        $DB->insert_record('tool_imageextractor_item', (object) [
+            'jobid'       => $result['id'],
+            'fileid'      => 1,
+            'contenthash' => sha1('x'),
+            'filename'    => 'x.png',
+            'outputname'  => 'x.png',
+        ]);
+
+        $this->assertTrue(manager::delete_job($result['id']));
+        // Still present, parked for the background clear.
+        $this->assertSame(
+            manager::STATUS_CLEARING,
+            $DB->get_field('tool_imageextractor_job', 'status', ['id' => $result['id']])
+        );
+
+        $this->runAdhocTasks('\tool_imageextractor\task\reset_job');
+
+        $this->assertFalse($DB->record_exists('tool_imageextractor_item', ['jobid' => $result['id']]));
+        $this->assertFalse($DB->record_exists('tool_imageextractor_job', ['id' => $result['id']]));
+    }
+
+    /**
      * criteria_from_data maps raw form fields to criteria: kilobyte sizes are
      * converted to bytes, a comma-separated MIME list is split, and id lists
      * are cleaned - without any database access.
