@@ -13,6 +13,15 @@ Build `2026071001`.
 Follow-up fixes addressing review of the unified extract/replace flow.
 
 ### Fixed
+- **The results and replace-confirmation pages could time out on a large job,
+  so the extract/replace action never queued.** `review_summary()` counted the
+  `pending` and `skipped` item rows on every load, but immediately after analyse
+  those millions of rows are freshly inserted and unvacuumed, so PostgreSQL
+  cannot answer the count from the index alone and scans the heap for tens of
+  seconds — long enough to hit the gateway timeout before the task was queued.
+  The counts were not used by either page (both show the stored `totalmatched`
+  and a 50-row sample), so they are gone: the review now reads only the bounded
+  sample, with no aggregate over the item table.
 - A **"broken or missing files"** analysis can no longer be extracted: its
   files are selected because their content is unreadable, so packing them only
   re-fails. The results page hides the Extract panel and explains that such a

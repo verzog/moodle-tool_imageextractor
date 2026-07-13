@@ -176,12 +176,13 @@ final class process_replace_test extends \advanced_testcase {
         $this->assertNull($item->replacementname);
         $this->assertSame('OLD', $this->content_at($target));
 
-        // The review summary reads the stored breakdown.
+        // The review summary reports the stored total and a bounded sample of
+        // rows, without counting or aggregating over the item table.
         $review = manager::review_summary($job->id);
         $this->assertSame(1, $review['total']);
-        $this->assertSame(1, $review['willreplace']);
-        $this->assertSame(0, $review['willskip']);
+        $this->assertFalse($review['truncated']);
         $this->assertCount(1, $review['rows']);
+        $this->assertArrayNotHasKey('willreplace', $review);
 
         // The sample row carries the fields the review page needs to build the
         // current-image thumbnail (its original location and mime type).

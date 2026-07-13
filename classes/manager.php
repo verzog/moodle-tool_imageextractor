@@ -664,25 +664,29 @@ class manager {
     }
 
     /**
-     * Exact summary of an analysed replace job for the review screen, read
-     * from the prepared item rows - cheap indexed queries, no file-table scan.
+     * Summary of an analysed job for the results/review screen: the stored
+     * total plus a bounded sample of the matched item rows. Deliberately does
+     * no count or aggregate over the item table (see below) so the page cannot
+     * time out on a freshly analysed, multi-million item job.
      *
      * @param int $jobid
      * @param int $samplelimit Maximum sample rows to return.
-     * @return array ['total','willreplace','willskip','truncated','rows']
+     * @return array ['total','truncated','rows']
      */
     public static function review_summary(int $jobid, int $samplelimit = 50): array {
         global $DB;
 
         $job = self::get_job($jobid);
-        $willreplace = $DB->count_records(
-            'tool_imageextractor_item',
-            ['jobid' => $jobid, 'status' => 'pending']
-        );
-        $willskip = $DB->count_records(
-            'tool_imageextractor_item',
-            ['jobid' => $jobid, 'status' => 'skipped']
-        );
+        // Read only a bounded sample of rows (LIMIT), never a count or aggregate
+        // over the whole item table. Immediately after analyse those rows are
+        // freshly inserted and not yet vacuumed, so a COUNT with a status filter
+        // cannot use an index-only scan - PostgreSQL falls back to heap
+        // visibility checks over every matching row, which on a multi-million
+        // item job runs for tens of seconds on the web request and times the
+        // page out before the extract/replace action can be queued. The stored
+        // totalmatched already gives the headline count, and no caller needs a
+        // live per-status breakdown here (the replace/skip split is only known
+        // at apply time).
         $rows = array_values($DB->get_records(
             'tool_imageextractor_item',
             ['jobid' => $jobid],
@@ -693,11 +697,9 @@ class manager {
         ));
 
         return [
-            'total'       => (int) $job->totalmatched,
-            'willreplace' => $willreplace,
-            'willskip'    => $willskip,
-            'truncated'   => ((int) $job->totalmatched) > count($rows),
-            'rows'        => $rows,
+            'total'     => (int) $job->totalmatched,
+            'truncated' => ((int) $job->totalmatched) > count($rows),
+            'rows'      => $rows,
         ];
     }
 
