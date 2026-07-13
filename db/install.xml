@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="admin/tool/imageextractor/db" VERSION="2026062702" COMMENT="Find images in the file storage and export, or restore/replace, them with metadata and naming rules."
+<XMLDB PATH="admin/tool/imageextractor/db" VERSION="2026071000" COMMENT="Find images in the file storage and export, or restore/replace, them with metadata and naming rules."
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../../lib/xmldb/xmldb.xsd">
   <TABLES>
@@ -8,7 +8,7 @@
         <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
         <FIELD NAME="name" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="description" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
-        <FIELD NAME="jobtype" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="extract" SEQUENCE="false" COMMENT="extract or replace."/>
+        <FIELD NAME="jobtype" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="" SEQUENCE="false" COMMENT="Empty until an action is chosen, then extract or replace."/>
         <FIELD NAME="status" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="draft" SEQUENCE="false"/>
         <FIELD NAME="criteria" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="JSON-encoded search criteria, including any CSV-derived lists."/>
         <FIELD NAME="csvmode" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="none" SEQUENCE="false"/>
