@@ -35,7 +35,7 @@ class manager {
     /** @var string Currently being processed (matching or packing). */
     const STATUS_PROCESSING = 'processing';
 
-    /** @var string Replace job analysed; awaiting admin review before applying. */
+    /** @var string Analysed; results are ready and an action can be chosen. */
     const STATUS_REVIEW = 'review';
 
     /** @var string A prior run's results are being removed in the background. */
@@ -217,7 +217,13 @@ class manager {
     }
 
     /**
-     * Create or update a job from submitted form data.
+     * Create or update a criteria-only job from submitted form data.
+     *
+     * A job now stores only how it selects files (its criteria, CSV mode and
+     * "missing only" refinement). The extract-versus-replace choice - and the
+     * naming, volume and replacement options that go with it - is made later
+     * from the results page, so nothing about an action is stored here and a
+     * new job's jobtype is left unset.
      *
      * Reads the optional CSV upload from the form's draft area, parses it
      * according to the chosen mode, and folds the result into the stored
@@ -270,21 +276,10 @@ class manager {
             $criteria['courseids'] = array_values(array_unique(array_merge($csvcourseids, $formcourseids)));
         }
 
-        $defaultvolmb = (int) get_config('tool_imageextractor', 'default_volume_mb');
-        $volumemb = !empty($data->volumemb) ? (int) $data->volumemb : ($defaultvolmb ?: 2048);
-
-        $jobtype = ($data->jobtype ?? 'extract') === 'replace' ? 'replace' : 'extract';
-
         $record = new \stdClass();
         $record->name = trim((string) $data->name);
         $record->description = trim((string) ($data->description ?? ''));
-        $record->jobtype = $jobtype;
         $record->csvmode = $csvmode;
-        $record->namingrule = trim((string) ($data->namingrule ?? '')) ?: '{originalname}';
-        $record->dedupe = !empty($data->dedupe) ? 1 : 0;
-        $record->volumesize = max(1, $volumemb) * 1024 * 1024;
-        $record->replacemode = ($data->replacemode ?? 'single') === 'zip' ? 'zip' : 'single';
-        $record->backup = !empty($data->backup) ? 1 : 0;
         $record->missingonly = !empty($data->missingonly) ? 1 : 0;
         $record->criteria = json_encode($criteria);
         $record->usermodified = $USER->id;
@@ -308,6 +303,9 @@ class manager {
                 self::reset_results($record->id);
             }
         } else {
+            // A new job is criteria-only: its extract/replace action, and the
+            // options that go with it, are chosen later from the results page.
+            $record->jobtype = '';
             $record->status = self::STATUS_DRAFT;
             $record->timecreated = $now;
             $record->id = $DB->insert_record('tool_imageextractor_job', $record);
@@ -325,11 +323,91 @@ class manager {
             );
         }
 
-        if ($jobtype === 'replace') {
-            self::store_replacement_files($data, (int) $record->id);
+        return ['id' => (int) $record->id, 'warnings' => $warnings];
+    }
+
+    /**
+     * Record the Extract action chosen for an analysed job: its naming rule and
+     * volume size, and set its type to extract. The already-matched item rows
+     * are left untouched - queue_extract() packs them.
+     *
+     * @param int $jobid
+     * @param string $namingrule Output-name template.
+     * @param int $volumemb Maximum ZIP volume size in megabytes.
+     * @return void
+     */
+    public static function set_extract_action(int $jobid, string $namingrule, int $volumemb): void {
+        global $DB, $USER;
+
+        $record = new \stdClass();
+        $record->id = $jobid;
+        $record->jobtype = 'extract';
+        $record->namingrule = trim($namingrule) !== '' ? trim($namingrule) : '{originalname}';
+        $record->volumesize = max(1, $volumemb) * 1024 * 1024;
+        $record->usermodified = $USER->id;
+        $record->timemodified = time();
+        $DB->update_record('tool_imageextractor_job', $record);
+    }
+
+    /**
+     * Record the Replace action chosen for an analysed job: store its uploaded
+     * replacement source, remember the mode and backup flag, and set its type to
+     * replace. The already-matched item rows are left untouched - queue_job()
+     * applies them once the destructive confirmation is given.
+     *
+     * @param int $jobid
+     * @param \stdClass $data Submitted replace-panel data (replacemode, backup,
+     *                        replacementfile/replacementzip draft item ids).
+     * @return void
+     */
+    public static function set_replace_action(int $jobid, \stdClass $data): void {
+        global $DB, $USER;
+
+        $record = new \stdClass();
+        $record->id = $jobid;
+        $record->jobtype = 'replace';
+        $record->replacemode = ($data->replacemode ?? 'single') === 'zip' ? 'zip' : 'single';
+        $record->backup = !empty($data->backup) ? 1 : 0;
+        $record->usermodified = $USER->id;
+        $record->timemodified = time();
+        $DB->update_record('tool_imageextractor_job', $record);
+
+        self::store_replacement_files($data, $jobid);
+    }
+
+    /**
+     * Queue the Extract packing of an analysed job's already-matched items. The
+     * item rows and matched totals are kept; only the previous packing outputs
+     * (volumes, manifest, progress counters) are reset so a re-extract starts
+     * clean. The packing task re-queues itself, paced, until every item is
+     * packed.
+     *
+     * @param int $jobid
+     * @return void
+     */
+    public static function queue_extract(int $jobid): void {
+        global $DB;
+        $fs = get_file_storage();
+        $context = self::context();
+
+        // Drop any previous run's bounded outputs, but keep the analysed items
+        // and their matched totals so the packing has something to pack and the
+        // progress bar has a denominator.
+        $fs->delete_area_files($context->id, self::COMPONENT, 'volumes', $jobid);
+        $DB->delete_records('tool_imageextractor_volume', ['jobid' => $jobid]);
+        $fs->delete_area_files($context->id, self::COMPONENT, 'manifest', $jobid);
+        foreach (['processedcount', 'processedbytes', 'failedcount', 'volumecount'] as $field) {
+            $DB->set_field('tool_imageextractor_job', $field, 0, ['id' => $jobid]);
         }
 
-        return ['id' => (int) $record->id, 'warnings' => $warnings];
+        $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_QUEUED, ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'error', null, ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'timestarted', 0, ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'timecompleted', 0, ['id' => $jobid]);
+
+        $task = new task\process_job();
+        $task->set_custom_data(['jobid' => $jobid]);
+        \core\task\manager::queue_adhoc_task($task, true);
     }
 
     /**
@@ -457,16 +535,24 @@ class manager {
             return;
         }
 
+        // A criteria-only job driven straight to extraction (the CLI path,
+        // which cannot upload a replacement) becomes an extract job: the
+        // packing task matches and packs it in one shot.
+        if ($job->jobtype === '') {
+            $DB->set_field('tool_imageextractor_job', 'jobtype', 'extract', ['id' => $jobid]);
+        }
         $task = new task\process_job();
         $task->set_custom_data(['jobid' => $jobid, 'clearfirst' => true]);
         \core\task\manager::queue_adhoc_task($task, true);
     }
 
     /**
-     * Queue the background analyse phase of a replace job: match the targets
-     * and resolve their replacements without changing anything, then leave the
-     * job awaiting review. Nothing is replaced until the admin confirms the
-     * resulting preview, which queues the apply phase via queue_job().
+     * Queue the background analyse phase of any job: match the files its
+     * criteria select and record them as type-agnostic item rows, then leave
+     * the job at "results ready". No replacement is resolved and no output name
+     * is computed here - the extract or replace action chosen from the results
+     * page does that. Nothing is changed until an action is chosen and (for
+     * replace) confirmed.
      *
      * This keeps the (potentially minutes-long) scan of the file table out of
      * the web request, which used to time out at the gateway on large sites.
@@ -477,10 +563,6 @@ class manager {
     public static function queue_analyse(int $jobid): void {
         global $DB;
 
-        $job = self::get_job($jobid);
-        if ($job->jobtype !== 'replace') {
-            throw new \coding_exception('Only replace jobs have an analyse phase.');
-        }
         // Analysing clears previous results, so the same stranded-backup guard
         // as queue_job() applies.
         if (self::has_restorable($jobid)) {

@@ -88,13 +88,22 @@ class process_job extends \core\task\adhoc_task {
 
         try {
             if ($job->status === manager::STATUS_QUEUED) {
+                $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_PROCESSING, ['id' => $jobid]);
+                $DB->set_field('tool_imageextractor_job', 'timestarted', time(), ['id' => $jobid]);
                 // Clear any stale results here (deferred off the web request)
                 // before matching, so a re-run starts from a clean slate
                 // without duplicating items.
                 if ($clearfirst) {
                     manager::clear_results($jobid);
                 }
-                $this->prepare($job);
+                // The web flow analyses first, so the matched item rows already
+                // exist and this task only packs them. The CLI/direct path
+                // queues packing straight away with nothing matched yet, so it
+                // matches here before packing (mirroring the replace task's
+                // direct-apply fallback).
+                if (!$DB->record_exists('tool_imageextractor_item', ['jobid' => $jobid])) {
+                    $this->prepare($job);
+                }
                 $job = $DB->get_record('tool_imageextractor_job', ['id' => $jobid], '*', MUST_EXIST);
             }
 
@@ -217,6 +226,14 @@ class process_job extends \core\task\adhoc_task {
         $doneids = [];
         $failedids = [];
         $volumebytes = 0;
+        // A volume is its own ZIP, so output names only need to be unique within
+        // it; this map guards against two files in this volume colliding.
+        $seen = [];
+        // Names computed this run, keyed by item id, persisted alongside the
+        // done status so the manifest reports the packed name.
+        $names = [];
+        // Sequence numbers continue after everything packed in earlier volumes.
+        $seqbase = (int) $job->processedcount;
         // Bound this run by file count as well as volume size. Each file costs
         // a get_file_by_id (a mdl_files query), so with a large volume size one
         // run could otherwise fetch millions of files before the throttle delay
@@ -246,7 +263,16 @@ class process_job extends \core\task\adhoc_task {
                 continue;
             }
 
-            $entry = 'images/' . $item->outputname;
+            // The type-agnostic match left the output name blank; compute it now
+            // from the job's naming rule and the item's stored fields (the same
+            // placeholders as before). A pre-computed name (the CLI path) is
+            // reused as-is.
+            $outputname = $item->outputname !== '' ? $item->outputname
+                : naming::ensure_unique($this->render_name($job, $item, $seqbase + count($doneids) + 1), $seen);
+            $item->outputname = $outputname;
+            $names[(int) $item->id] = $outputname;
+
+            $entry = 'images/' . $outputname;
             $archivefiles[$entry] = $stored;
             $archivefiles[$entry . '.json'] = [$this->sidecar_json($item)];
 
@@ -310,6 +336,11 @@ class process_job extends \core\task\adhoc_task {
         }
 
         if ($doneids) {
+            // Persist the name each file was packed under so the manifest and
+            // the sidecar reflect what actually went into the archive.
+            foreach ($names as $itemid => $outputname) {
+                $DB->set_field('tool_imageextractor_item', 'outputname', $outputname, ['id' => $itemid]);
+            }
             $this->mark_items($doneids, 'done', $sequence, $now);
             $DB->execute(
                 'UPDATE {tool_imageextractor_job}
@@ -408,7 +439,7 @@ class process_job extends \core\task\adhoc_task {
             'filesize', 'mimetype', 'component', 'filearea', 'fileitemid',
             'contextid', 'courseid', 'courseshortname', 'uploaderid',
             'filetimecreated', 'status',
-        ]);
+        ], ',', '"', '\\');
 
         $rs = $DB->get_recordset('tool_imageextractor_item', ['jobid' => $job->id], 'volume ASC, id ASC');
         foreach ($rs as $item) {
@@ -429,7 +460,7 @@ class process_job extends \core\task\adhoc_task {
                 $item->uploaderid,
                 $item->filetimecreated ? userdate($item->filetimecreated) : '',
                 $item->status,
-            ]);
+            ], ',', '"', '\\');
         }
         $rs->close();
         fclose($handle);
@@ -470,6 +501,37 @@ class process_job extends \core\task\adhoc_task {
             'filetimecreated' => (int) $item->filetimecreated,
         ];
         return json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    }
+
+    /**
+     * Render the output name for one matched item from the job's naming rule.
+     *
+     * The course a file belongs to is resolved (cached) from its stored context
+     * so course placeholders keep working even though the type-agnostic match no
+     * longer records course details.
+     *
+     * @param \stdClass $job
+     * @param \stdClass $item The matched item row.
+     * @param int $seq Sequence number for this file within the job.
+     * @return string A cleaned output filename (not yet made unique).
+     */
+    protected function render_name(\stdClass $job, \stdClass $item, int $seq): string {
+        $courseinfo = $this->resolve_course((int) $item->contextid);
+        return naming::render($job->namingrule, [
+            'originalname'    => $item->filename,
+            'fileid'          => $item->fileid,
+            'contenthash'     => $item->contenthash,
+            'component'       => $item->component,
+            'filearea'        => $item->filearea,
+            'itemid'          => $item->fileitemid,
+            'courseid'        => $courseinfo->courseid,
+            'coursename'      => $courseinfo->fullname,
+            'courseshortname' => $courseinfo->shortname,
+            'uploaderid'      => $item->uploaderid,
+            'mimetype'        => $item->mimetype,
+            'seq'             => $seq,
+            'date'            => userdate((int) $item->filetimecreated, '%Y%m%d'),
+        ]);
     }
 
     /**

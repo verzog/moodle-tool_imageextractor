@@ -220,15 +220,10 @@ class replacer {
                 }
             }
 
-            // Decide which replacement applies, and flag targets that have none.
-            $replacement = $this->resolve_replacement($file->filename);
-            $status = 'pending';
-            $note = null;
-            if (!$replacement) {
-                $status = 'skipped';
-                $note = get_string('noreplacement', 'tool_imageextractor');
-            }
-
+            // The match is type-agnostic: it records the file as a pending item
+            // without resolving a replacement or computing an output name. The
+            // extract action names it at pack time; the replace action resolves
+            // (and possibly skips) it at apply time.
             $item = new \stdClass();
             $item->jobid = (int) $this->job->id;
             $item->fileid = (int) $file->id;
@@ -245,10 +240,10 @@ class replacer {
             $item->filetimecreated = (int) $file->timecreated;
             $item->courseid = 0;
             $item->outputname = '';
-            $item->replacementname = $replacement ? $replacement->get_filename() : null;
-            $item->note = $note;
+            $item->replacementname = null;
+            $item->note = null;
             $item->volume = 0;
-            $item->status = $status;
+            $item->status = 'pending';
             $item->timeprocessed = 0;
             $batch[] = $item;
 
@@ -288,13 +283,28 @@ class replacer {
         $done = 0;
         $failed = 0;
         foreach ($items as $item) {
-            try {
-                $this->replace_one($item);
+            // Resolve the replacement now (the type-agnostic match did not).
+            // A target with no matching replacement is skipped, not failed -
+            // it is an expected outcome of a ZIP that does not cover every file,
+            // and it also records the resolved name for the review/manifest.
+            $replacement = $this->resolve_replacement($item->filename);
+            if (!$replacement) {
                 $DB->update_record('tool_imageextractor_item', (object) [
                     'id'            => $item->id,
-                    'status'        => 'done',
+                    'status'        => 'skipped',
                     'timeprocessed' => time(),
-                    'note'          => get_string('replaced', 'tool_imageextractor'),
+                    'note'          => get_string('noreplacement', 'tool_imageextractor'),
+                ]);
+                continue;
+            }
+            try {
+                $this->replace_one($item, $replacement);
+                $DB->update_record('tool_imageextractor_item', (object) [
+                    'id'              => $item->id,
+                    'status'          => 'done',
+                    'replacementname' => $replacement->get_filename(),
+                    'timeprocessed'   => time(),
+                    'note'            => get_string('replaced', 'tool_imageextractor'),
                 ]);
                 $done++;
             } catch (\Throwable $e) {
@@ -391,14 +401,10 @@ class replacer {
      * Back up and replace one target's content.
      *
      * @param \stdClass $item
+     * @param \stored_file $replacement The resolved replacement source.
      * @return void
      */
-    protected function replace_one(\stdClass $item) {
-        $replacement = $this->resolve_replacement($item->filename);
-        if (!$replacement) {
-            throw new \moodle_exception('noreplacement', 'tool_imageextractor');
-        }
-
+    protected function replace_one(\stdClass $item, \stored_file $replacement) {
         $existing = $this->fs->get_file(
             $item->contextid,
             $item->component,

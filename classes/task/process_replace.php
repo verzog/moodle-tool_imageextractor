@@ -66,10 +66,14 @@ class process_replace extends \core\task\adhoc_task {
             return;
         }
 
-        if (!manager::is_enabled() || !manager::is_replace_allowed()) {
-            // Throw rather than return so Moodle reschedules this adhoc task and
-            // the job resumes once replace is re-enabled, instead of the task
-            // being consumed and the job left stuck as queued forever.
+        // Analyse changes nothing (it only matches files), so it runs whenever
+        // the plugin is enabled - extract jobs analyse on any site. Only the
+        // destructive apply and restore ops require the replace opt-in. Throw
+        // rather than return so Moodle reschedules the task and the job resumes
+        // once it is re-enabled, instead of the task being consumed and the job
+        // left stuck as queued forever.
+        $needsreplace = in_array($op, ['apply', 'restore'], true);
+        if (!manager::is_enabled() || ($needsreplace && !manager::is_replace_allowed())) {
             throw new \moodle_exception('disabledretry', 'tool_imageextractor');
         }
 
