@@ -256,6 +256,13 @@ if ($action !== '' && confirm_sesskey()) {
     }
 }
 
+// While a job runs in the background, refresh the page periodically so the
+// progress bar and status advance without the admin hammering reload. Set only
+// for this main render - the confirmation screens above must not refresh away.
+if ($running) {
+    $PAGE->set_periodic_refresh_delay(20);
+}
+
 echo $OUTPUT->header();
 
 if (!manager::is_enabled()) {
@@ -316,6 +323,13 @@ if ($running) {
         $hint = 'runninghint';
     }
     echo $OUTPUT->notification(get_string($hint, 'tool_imageextractor'), 'info');
+
+    // Live progress of the current background stage (clearing previous
+    // results, or scanning for matching files).
+    $stagebar = tool_imageextractor_stage_progress($job);
+    if ($stagebar !== '') {
+        echo html_writer::div($stagebar, 'mb-3', ['style' => 'max-width: 28em']);
+    }
 }
 
 // Results page: the job is analysed and awaiting an action. Show the matched

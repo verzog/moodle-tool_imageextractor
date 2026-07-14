@@ -892,6 +892,44 @@ class manager {
         foreach (['totalmatched', 'totalbytes', 'processedcount', 'processedbytes', 'failedcount', 'volumecount'] as $field) {
             $DB->set_field('tool_imageextractor_job', $field, 0, ['id' => $jobid]);
         }
+        self::set_progress($jobid, null);
+    }
+
+    /**
+     * Record which background stage a job is in and how far it has got, so the
+     * UI can render a live progress bar while a long scan is still running.
+     * Pass a null stage to clear the report between stages (nothing rendered).
+     *
+     * @param int $jobid
+     * @param string|null $stage 'clear', 'match', or null for none.
+     * @param int $done Items the stage has processed so far.
+     * @param int $total Estimated total items for the stage.
+     * @return void
+     */
+    public static function set_progress(int $jobid, ?string $stage, int $done = 0, int $total = 0): void {
+        global $DB;
+        $DB->set_field('tool_imageextractor_job', 'progressstage', $stage, ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'progressdone', max(0, $done), ['id' => $jobid]);
+        $DB->set_field('tool_imageextractor_job', 'progresstotal', max(0, $total), ['id' => $jobid]);
+    }
+
+    /**
+     * Add to a job's current-stage progress counter (a relative UPDATE, so
+     * concurrent batches cannot lose increments) and return the new value.
+     *
+     * @param int $jobid
+     * @param int $delta Items processed by this batch.
+     * @return int The updated progressdone value.
+     */
+    public static function bump_progress(int $jobid, int $delta): int {
+        global $DB;
+        if ($delta > 0) {
+            $DB->execute(
+                'UPDATE {tool_imageextractor_job} SET progressdone = progressdone + :d WHERE id = :id',
+                ['d' => $delta, 'id' => $jobid]
+            );
+        }
+        return (int) $DB->get_field('tool_imageextractor_job', 'progressdone', ['id' => $jobid]);
     }
 
     /**

@@ -74,9 +74,12 @@ function tool_imageextractor_pluginfile($course, $cm, $context, $filearea, $args
  *
  * @param int $done Items processed so far.
  * @param int $total Total items the job matched.
+ * @param bool $approx Caption the total as an estimate ("done / ~total"), for
+ *                     stages whose denominator is a prior estimate rather than
+ *                     an exact count (the analysis scan).
  * @return string HTML, or an em dash when there is nothing to report.
  */
-function tool_imageextractor_progress_bar(int $done, int $total): string {
+function tool_imageextractor_progress_bar(int $done, int $total, bool $approx = false): string {
     if ($total <= 0) {
         return '-';
     }
@@ -95,7 +98,28 @@ function tool_imageextractor_progress_bar(int $done, int $total): string {
         'progress',
         ['style' => 'min-width: 6em']
     );
-    return $bar . html_writer::div($done . ' / ' . $total . ' (' . $pct . '%)', 'small text-nowrap');
+    $caption = $done . ' / ' . ($approx ? '~' : '') . $total . ' (' . $pct . '%)';
+    return $bar . html_writer::div($caption, 'small text-nowrap');
+}
+
+/**
+ * Render the live progress of a job's current background stage (clearing
+ * previous results, or scanning for matches), or '' when the job is not in a
+ * reporting stage. Shown while a job runs so a large analysis is no longer a
+ * black box between "queued" and "results ready".
+ *
+ * @param stdClass $job The job record.
+ * @return string HTML, or '' when there is no stage progress to show.
+ */
+function tool_imageextractor_stage_progress(stdClass $job): string {
+    $stage = (string) ($job->progressstage ?? '');
+    if (!in_array($stage, ['clear', 'match'], true) || (int) $job->progresstotal <= 0) {
+        return '';
+    }
+    // The denominator is an upfront estimate for the match scan (files can be
+    // added or removed while it runs) - caption it as approximate.
+    return html_writer::div(get_string('progressstage_' . $stage, 'tool_imageextractor'), 'small fw-bold')
+        . tool_imageextractor_progress_bar((int) $job->progressdone, (int) $job->progresstotal, $stage === 'match');
 }
 
 /**

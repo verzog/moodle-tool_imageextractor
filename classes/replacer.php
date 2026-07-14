@@ -175,7 +175,7 @@ class replacer {
      *
      * @param int $afterid Cursor file id (0 to start).
      * @param int $limit Maximum files to record this page.
-     * @return array ['lastid' => int, 'matched' => int, 'bytes' => int, 'exhausted' => bool]
+     * @return array ['lastid' => int, 'matched' => int, 'scanned' => int, 'bytes' => int, 'exhausted' => bool]
      */
     public function prepare_page(int $afterid, int $limit): array {
         global $DB;
@@ -257,6 +257,10 @@ class replacer {
         return [
             'lastid'    => $lastid,
             'matched'   => $matched,
+            // Rows examined this page - in "missing only" mode more than were
+            // recorded. This is the progress-bar increment: the estimated total
+            // counts every criteria match, whether or not it is later kept.
+            'scanned'   => count($rows),
             'bytes'     => $bytes,
             'exhausted' => count($rows) < $limit,
         ];

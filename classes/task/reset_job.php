@@ -75,11 +75,21 @@ class reset_job extends \core\task\adhoc_task {
         \core_php_time_limit::raise(0);
         \raise_memory_limit(MEMORY_EXTRA);
 
+        // First run: everything currently recorded is the denominator for the
+        // clearing progress bar. Requeued runs carry the stage on the job row
+        // and just advance the counter.
+        $cleartotal = (int) $job->progresstotal;
+        if ($job->progressstage !== 'clear') {
+            $cleartotal = $DB->count_records('tool_imageextractor_item', ['jobid' => $jobid]);
+            manager::set_progress($jobid, 'clear', 0, $cleartotal);
+        }
+
         // Delete the item rows and their backups a bounded chunk at a time,
         // re-queuing (paced) until none remain, so clearing a millions-row job
         // never pins the database in a single pass.
         $remaining = manager::clear_chunk($jobid, manager::batch_size());
         if ($remaining > 0) {
+            manager::set_progress($jobid, 'clear', max(0, $cleartotal - $remaining), $cleartotal);
             mtrace('tool_imageextractor: clearing job ' . $jobid . ', ' . $remaining . ' item rows left');
             $this->requeue($jobid, $thendelete);
             return;
