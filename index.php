@@ -74,11 +74,17 @@ foreach ($jobs as $job) {
     $statuslabel = get_string('jobstatus_' . $job->status, 'tool_imageextractor');
 
     $isrunning = in_array($job->status, [manager::STATUS_QUEUED, manager::STATUS_PROCESSING], true);
-    if ($job->status === manager::STATUS_CLEARING) {
+    // A running or clearing job may be mid-stage (clearing previous results,
+    // or scanning for matches); show that stage's live bar when it is.
+    $stagebar = ($isrunning || $job->status === manager::STATUS_CLEARING)
+        ? tool_imageextractor_stage_progress($job) : '';
+    if ($stagebar !== '') {
+        $progress = $stagebar;
+    } else if ($job->status === manager::STATUS_CLEARING) {
         // Results are being removed in the background; no meaningful progress.
         $progress = get_string('clearing', 'tool_imageextractor');
     } else if ($isrunning && (int) $job->totalmatched === 0) {
-        // The analyse phase has no totals until it finishes.
+        // The analyse phase has not reported totals yet.
         $progress = get_string('analysing', 'tool_imageextractor');
     } else {
         $progress = tool_imageextractor_progress_bar((int) $job->processedcount, (int) $job->totalmatched);

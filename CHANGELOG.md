@@ -6,6 +6,25 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.14.0-beta] — 2026-07-14
+
+Build `2026071400`.
+
+### Added
+- **Live progress bar for the analysis phase.** Analysing a large course used
+  to be a black box: the job sat on "Analysing…" with no feedback until the
+  whole scan finished, because the matched totals were only written at the end.
+  The analyse task now records an upfront estimate of the matched files (one
+  COUNT over the criteria when the scan starts) and advances a counter after
+  every throttled batch, and both the job page and the jobs overview render a
+  real progress bar ("scanned X of ~Y") while the scan is still running. The
+  same live bar covers the "removing previous results" stage of a re-analysis
+  and the background clearing state, and each match batch now also logs its
+  progress to the task log. New `progressstage` / `progressdone` /
+  `progresstotal` fields on the job table carry the report (DB upgrade).
+- **The job page auto-refreshes while a job is running or clearing** (every
+  20 seconds), so progress advances without hammering reload.
+
 ## [0.13.4-beta] — 2026-07-13
 
 Build `2026071004`.

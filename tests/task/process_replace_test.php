@@ -334,4 +334,46 @@ final class process_replace_test extends \advanced_testcase {
             ['jobid' => $job->id, 'status' => 'pending']
         ));
     }
+
+    /**
+     * While an analysis is scanning, the job reports live stage progress (an
+     * upfront estimate as the denominator, batches scanned as the numerator)
+     * so the UI can render a progress bar; the report is retired once the
+     * exact totals exist.
+     */
+    public function test_analyse_reports_live_progress(): void {
+        $this->resetAfterTest();
+        $this->expectOutputRegex('/tool_imageextractor:/');
+        $this->enable_plugin();
+        // Three matching targets with a batch of two forces matching to span
+        // more than one page; no throttle so requeued runs are due immediately.
+        set_config('batch_size', 2, 'tool_imageextractor');
+        set_config('throttle_delay', 0, 'tool_imageextractor');
+
+        $this->make_target('A');
+        $this->make_target('B');
+        $this->make_target('C');
+        $job = $this->make_replace_job('NEW');
+
+        manager::queue_analyse($job->id);
+        // Generation 1: the clear phase (nothing to remove) queues the match.
+        $this->runAdhocTasks(process_replace::class);
+        // Generation 2: the first match page scans 2 of the ~3 estimated files.
+        $this->runAdhocTasks(process_replace::class);
+
+        $job = manager::get_job($job->id);
+        $this->assertSame(manager::STATUS_PROCESSING, $job->status);
+        $this->assertSame('match', $job->progressstage);
+        $this->assertSame(2, (int) $job->progressdone);
+        $this->assertSame(3, (int) $job->progresstotal);
+
+        // Finishing the scan retires the stage report - the exact recounted
+        // totals take over on the review screen.
+        $this->drain_tasks();
+        $job = manager::get_job($job->id);
+        $this->assertSame(manager::STATUS_REVIEW, $job->status);
+        $this->assertSame(3, (int) $job->totalmatched);
+        $this->assertNull($job->progressstage);
+        $this->assertSame(0, (int) $job->progresstotal);
+    }
 }

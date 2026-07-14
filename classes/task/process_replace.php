@@ -22,6 +22,7 @@
 namespace tool_imageextractor\task;
 
 use tool_imageextractor\manager;
+use tool_imageextractor\matcher;
 use tool_imageextractor\replacer;
 
 /**
@@ -120,14 +121,25 @@ class process_replace extends \core\task\adhoc_task {
             }
 
             if ($phase === 'clear') {
+                // First clear run: everything currently recorded is the
+                // denominator for the clearing progress bar. Requeued runs
+                // carry the stage on the job row and just advance the counter.
+                $cleartotal = (int) $job->progresstotal;
+                if ($job->progressstage !== 'clear') {
+                    $cleartotal = $DB->count_records('tool_imageextractor_item', ['jobid' => $jobid]);
+                    manager::set_progress($jobid, 'clear', 0, $cleartotal);
+                }
                 $remaining = manager::clear_chunk($jobid, $batch);
                 if ($remaining > 0) {
+                    manager::set_progress($jobid, 'clear', max(0, $cleartotal - $remaining), $cleartotal);
                     mtrace('tool_imageextractor: replace job ' . $jobid .
                         ' clearing previous results, ' . $remaining . ' item rows left');
                     $this->requeue(['jobid' => $jobid, 'op' => $op, 'phase' => 'clear']);
                     return;
                 }
-                // Items gone; drop the bounded outputs, zero the counters, match.
+                // Items gone; drop the bounded outputs, zero the counters
+                // (which also clears the stage - the match phase restarts it),
+                // and match.
                 manager::clear_outputs($jobid);
                 mtrace('tool_imageextractor: matching replace job ' . $jobid . ' ("' . $job->name . '")');
                 $this->requeue(['jobid' => $jobid, 'op' => $op, 'phase' => 'match', 'curid' => 0]);
@@ -136,14 +148,28 @@ class process_replace extends \core\task\adhoc_task {
 
             if ($phase === 'match') {
                 $curid = (int) ($data->curid ?? 0);
+                // Entering the match: estimate the matched total once (one
+                // COUNT over the criteria) so every later batch can report
+                // "scanned X of ~Y" and the UI can draw a progress bar while
+                // the scan is still running.
+                if ($job->progressstage !== 'match') {
+                    $estimate = (new matcher(manager::decode_criteria($job), false))->estimate();
+                    manager::set_progress($jobid, 'match', 0, (int) $estimate['count']);
+                    $job->progresstotal = (int) $estimate['count'];
+                }
                 $page = $replacer->prepare_page($curid, $batch);
                 if (!$page['exhausted']) {
+                    $done = manager::bump_progress($jobid, (int) $page['scanned']);
+                    mtrace('tool_imageextractor: replace job ' . $jobid . ' matching, scanned ' .
+                        $done . ' of ~' . (int) $job->progresstotal . ' candidate files');
                     $this->requeue(['jobid' => $jobid, 'op' => $op, 'phase' => 'match', 'curid' => $page['lastid']]);
                     return;
                 }
                 // Matching is complete: set the totals from the rows actually
-                // recorded (retry-safe - a replayed page cannot inflate them).
+                // recorded (retry-safe - a replayed page cannot inflate them),
+                // and retire the stage progress (the exact totals take over).
                 manager::recount_totals($jobid);
+                manager::set_progress($jobid, null);
                 $matched = (int) $DB->get_field('tool_imageextractor_job', 'totalmatched', ['id' => $jobid]);
                 if ($op === 'analyse') {
                     $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_REVIEW, ['id' => $jobid]);
@@ -171,6 +197,7 @@ class process_replace extends \core\task\adhoc_task {
         } catch (\Throwable $e) {
             $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_FAILED, ['id' => $jobid]);
             $DB->set_field('tool_imageextractor_job', 'error', $e->getMessage(), ['id' => $jobid]);
+            manager::set_progress($jobid, null);
             mtrace('tool_imageextractor: replace job ' . $jobid . ' failed: ' . $e->getMessage());
         }
     }

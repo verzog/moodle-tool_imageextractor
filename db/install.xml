@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="admin/tool/imageextractor/db" VERSION="2026071000" COMMENT="Find images in the file storage and export, or restore/replace, them with metadata and naming rules."
+<XMLDB PATH="admin/tool/imageextractor/db" VERSION="2026071400" COMMENT="Find images in the file storage and export, or restore/replace, them with metadata and naming rules."
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../../lib/xmldb/xmldb.xsd">
   <TABLES>
@@ -24,6 +24,9 @@
         <FIELD NAME="processedbytes" TYPE="int" LENGTH="20" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="failedcount" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="volumecount" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="progressstage" TYPE="char" LENGTH="20" NOTNULL="false" SEQUENCE="false" COMMENT="Which background stage is reporting live progress (clear or match), null between stages."/>
+        <FIELD NAME="progressdone" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Files/items the current stage has processed so far."/>
+        <FIELD NAME="progresstotal" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Estimated total files/items for the current stage (denominator for the progress bar)."/>
         <FIELD NAME="error" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="usermodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
