@@ -75,6 +75,7 @@ $string['criteriaandmore'] = 'and {$a} more';
 $string['criteriamatchfiles'] = 'Match list: file names';
 $string['criteriamatchhashes'] = 'Match list: content hashes';
 $string['criteriarows'] = 'Per-row criteria specifications';
+$string['criteriausers'] = 'Uploaded by';
 $string['csvfile'] = 'CSV file';
 $string['csvmode'] = 'Select files using';
 $string['csvmode_criteria'] = 'A CSV of per-row criteria (each row is a search specification)';

@@ -353,18 +353,25 @@ function tool_imageextractor_criteria_rows(stdClass $job): array {
         get_string('csvmode_' . $mode, 'tool_imageextractor'),
     ];
 
-    // A match-list CSV nominates exact files and ignores the criteria fields.
-    if ($mode === 'match') {
-        if (!empty($criteria['filenames']) && is_array($criteria['filenames'])) {
-            $rows[] = [get_string('criteriamatchfiles', 'tool_imageextractor'), count($criteria['filenames'])];
+    // A match-list CSV nominates exact files and ignores the criteria fields -
+    // but only when it actually nominated some. An empty/header-only match CSV
+    // leaves save_job's default criteria in force, so fall through to show them.
+    $filenames = (!empty($criteria['filenames']) && is_array($criteria['filenames'])) ? $criteria['filenames'] : [];
+    $hashes = (!empty($criteria['contenthashes']) && is_array($criteria['contenthashes'])) ? $criteria['contenthashes'] : [];
+    if ($mode === 'match' && ($filenames || $hashes)) {
+        if ($filenames) {
+            $rows[] = [get_string('criteriamatchfiles', 'tool_imageextractor'), count($filenames)];
         }
-        if (!empty($criteria['contenthashes']) && is_array($criteria['contenthashes'])) {
-            $rows[] = [get_string('criteriamatchhashes', 'tool_imageextractor'), count($criteria['contenthashes'])];
+        if ($hashes) {
+            $rows[] = [get_string('criteriamatchhashes', 'tool_imageextractor'), count($hashes)];
         }
     } else {
+        // The matcher applies the image-only filter unless it was explicitly
+        // switched off, so an absent key means it is ON (matcher::build_group).
+        $imageon = !array_key_exists('imageonly', $criteria) || !empty($criteria['imageonly']);
         $rows[] = [
             get_string('imageonly', 'tool_imageextractor'),
-            empty($criteria['imageonly']) ? get_string('no') : get_string('yes'),
+            $imageon ? get_string('yes') : get_string('no'),
         ];
 
         $courses = tool_imageextractor_name_list('course', 'shortname', $criteria['courseids'] ?? []);
@@ -374,6 +381,12 @@ function tool_imageextractor_criteria_rows(stdClass $job): array {
         $categories = tool_imageextractor_name_list('course_categories', 'name', $criteria['categoryids'] ?? []);
         if ($categories !== '') {
             $rows[] = [get_string('categories', 'tool_imageextractor'), $categories];
+        }
+        // A scope CSV can restrict to uploaders; the matcher applies it as a
+        // userid filter, so it belongs in the definition summary too.
+        $users = tool_imageextractor_user_list($criteria['userids'] ?? []);
+        if ($users !== '') {
+            $rows[] = [get_string('criteriausers', 'tool_imageextractor'), $users];
         }
 
         if (!empty($criteria['modname'])) {
@@ -450,8 +463,46 @@ function tool_imageextractor_name_list(string $table, string $namefield, $ids, i
     foreach ($ids as $id) {
         $names[] = isset($records[$id]) ? format_string($records[$id]->{$namefield}) : '#' . $id;
     }
-    $shown = array_slice($names, 0, $cap);
-    $summary = s(implode(', ', $shown));
+    return tool_imageextractor_capped_list($names, $cap);
+}
+
+/**
+ * Resolve a list of user ids to a capped, comma-separated list of full names,
+ * for the uploader scope of a scope CSV. Ids with no matching user show as
+ * "#id".
+ *
+ * @param mixed $ids An array of user ids (anything else yields '').
+ * @param int $cap Maximum names to list before summarising the remainder.
+ * @return string
+ */
+function tool_imageextractor_user_list($ids, int $cap = 10): string {
+    global $DB;
+    if (empty($ids) || !is_array($ids)) {
+        return '';
+    }
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($id) => $id > 0)));
+    if (!$ids) {
+        return '';
+    }
+    $fields = implode(', ', array_merge(['id'], \core_user\fields::get_name_fields()));
+    $records = $DB->get_records_list('user', 'id', $ids, '', $fields);
+    $names = [];
+    foreach ($ids as $id) {
+        $names[] = isset($records[$id]) ? fullname($records[$id]) : '#' . $id;
+    }
+    return tool_imageextractor_capped_list($names, $cap);
+}
+
+/**
+ * Join a list of names into a comma-separated string, capping it with a
+ * "+N more" tail so a very large scope cannot overflow the page.
+ *
+ * @param string[] $names The already-resolved names, in order.
+ * @param int $cap Maximum names to list before summarising the remainder.
+ * @return string
+ */
+function tool_imageextractor_capped_list(array $names, int $cap): string {
+    $summary = s(implode(', ', array_slice($names, 0, $cap)));
     if (count($names) > $cap) {
         $summary .= ' ' . get_string('criteriaandmore', 'tool_imageextractor', count($names) - $cap);
     }
