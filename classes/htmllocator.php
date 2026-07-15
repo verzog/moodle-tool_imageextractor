@@ -74,8 +74,8 @@ class htmllocator {
     public static function is_undescribed(\stdClass $item): bool {
         $filename = (string) $item->filename;
         foreach (self::locate($item) as $location) {
-            // extract_alts returns the alt value of every <img> that references
-            // this file (an empty string when the tag has no alt); a blank one
+            // Every <img> that references this file yields its alt value (an
+            // empty string when the tag has no alt attribute); a blank one
             // means the image is shown without a description.
             foreach (self::extract_alts($location->html, $filename) as $alt) {
                 if (trim($alt) === '') {

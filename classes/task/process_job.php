@@ -154,7 +154,7 @@ class process_job extends \core\task\adhoc_task {
             }
             $lasthash = $file->contenthash;
 
-            // "Missing alt" audit refinement (the matcher's SQL cannot express
+            // Missing-alt audit refinement (the matcher's SQL cannot express
             // it): keep only images shown in content without a description.
             if (!empty($job->altmissing) && !$this->passes_alt_refinement($file)) {
                 continue;
