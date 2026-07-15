@@ -328,6 +328,7 @@ class manager {
         $record->description = trim((string) ($data->description ?? ''));
         $record->csvmode = $csvmode;
         $record->missingonly = !empty($data->missingonly) ? 1 : 0;
+        $record->altmissing = !empty($data->altmissing) ? 1 : 0;
         $record->criteria = json_encode($criteria);
         $record->usermodified = $USER->id;
         $record->timemodified = $now;
@@ -435,10 +436,10 @@ class manager {
         }
 
         if ($mode === 'alttext') {
-            // Alt-text: only the description CSV is stored; no image source, no
-            // backup (the old alt text is recorded per item at apply time) and
-            // no optimization.
-            $record->backup = 0;
+            // Alt-text: only the description CSV is stored; no image source and
+            // no optimization. Backup (on by default) keeps the original HTML
+            // of each changed field so the change can be reverted with Restore.
+            $record->backup = !empty($data->backup) ? 1 : 0;
             $record->metaauthor = null;
             $record->metalicense = null;
             $record->optimizemaxpx = 0;
@@ -865,11 +866,17 @@ class manager {
      */
     public static function has_restorable(int $jobid): bool {
         global $DB;
-        // Only meaningful when the job actually kept backups; a replaced item
-        // with no backup file cannot be restored.
-        if (!$DB->record_exists('tool_imageextractor_job', ['id' => $jobid, 'backup' => 1])) {
+        // Only meaningful when the job actually kept backups.
+        $job = $DB->get_record('tool_imageextractor_job', ['id' => $jobid], 'id, replacemode, backup', IGNORE_MISSING);
+        if (!$job || !$job->backup) {
             return false;
         }
+        // An alt-text replace is reverted from the per-field HTML backups.
+        if ($job->replacemode === 'alttext') {
+            return $DB->record_exists('tool_imageextractor_htmlbackup', ['jobid' => $jobid]);
+        }
+        // A content replace is reverted from the per-item file backups, which
+        // exist for its done items.
         return $DB->record_exists(
             'tool_imageextractor_item',
             ['jobid' => $jobid, 'status' => 'done']
@@ -983,6 +990,11 @@ class manager {
         $fs->delete_area_files($context->id, self::COMPONENT, 'volumes', $jobid);
         $DB->delete_records('tool_imageextractor_volume', ['jobid' => $jobid]);
         $fs->delete_area_files($context->id, self::COMPONENT, 'manifest', $jobid);
+
+        // The per-field HTML backups of an alt-text replace are bounded (one
+        // row per changed field) and job-scoped, so they are cleared here with
+        // the other outputs whenever a job is cleared, reset or deleted.
+        $DB->delete_records('tool_imageextractor_htmlbackup', ['jobid' => $jobid]);
 
         self::zero_counters($jobid);
     }

@@ -154,6 +154,12 @@ class process_job extends \core\task\adhoc_task {
             }
             $lasthash = $file->contenthash;
 
+            // Missing-alt audit refinement (the matcher's SQL cannot express
+            // it): keep only images shown in content without a description.
+            if (!empty($job->altmissing) && !$this->passes_alt_refinement($file)) {
+                continue;
+            }
+
             $courseinfo = $this->resolve_course((int) $file->contextid);
             $outputname = naming::render($job->namingrule, [
                 'originalname'    => $file->filename,
@@ -576,6 +582,25 @@ class process_job extends \core\task\adhoc_task {
     }
 
     /**
+     * Whether a matched file is an image displayed in content without a
+     * description (an empty/missing alt), for the "missing alt" refinement on
+     * the direct-extract path.
+     *
+     * @param \stdClass $file A matched {files} row from the matcher.
+     * @return bool
+     */
+    protected function passes_alt_refinement(\stdClass $file): bool {
+        return \tool_imageextractor\htmllocator::is_undescribed((object) [
+            'component'  => $file->component,
+            'filearea'   => $file->filearea,
+            'contextid'  => (int) $file->contextid,
+            'fileitemid' => (int) $file->itemid,
+            'filepath'   => $file->filepath,
+            'filename'   => $file->filename,
+        ]);
+    }
+
+    /**
      * Resolve the description (alt text) of a matched image by reading the HTML
      * field that embeds it. Only images can carry a description, and only when
      * embedded in a mapped rich-text field; everything else is blank. When an
@@ -589,9 +614,10 @@ class process_job extends \core\task\adhoc_task {
         if (strpos((string) $item->mimetype, 'image/') !== 0) {
             return '';
         }
+        $reference = \tool_imageextractor\htmllocator::reference($item);
         $alts = [];
         foreach (\tool_imageextractor\htmllocator::locate($item) as $location) {
-            foreach (\tool_imageextractor\htmllocator::extract_alts($location->html, $item->filename) as $alt) {
+            foreach (\tool_imageextractor\htmllocator::extract_alts($location->html, $reference) as $alt) {
                 if (trim($alt) !== '' && !in_array($alt, $alts, true)) {
                     $alts[] = $alt;
                 }

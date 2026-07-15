@@ -61,6 +61,46 @@ class htmllocator {
     }
 
     /**
+     * Whether an image is embedded in mapped content via at least one <img>
+     * tag whose alt attribute is empty or missing - i.e. it is displayed to
+     * users without a description. An image that is not embedded in any mapped
+     * field, or is embedded only with non-empty descriptions, is not flagged.
+     *
+     * @param \stdClass $item An object exposing component, filearea, contextid,
+     *                        fileitemid and filename (a matched item, or a
+     *                        matcher file row normalised to those names).
+     * @return bool
+     */
+    public static function is_undescribed(\stdClass $item): bool {
+        $reference = self::reference($item);
+        foreach (self::locate($item) as $location) {
+            // Every <img> that references this file yields its alt value (an
+            // empty string when the tag has no alt attribute); a blank one
+            // means the image is shown without a description.
+            foreach (self::extract_alts($location->html, $reference) as $alt) {
+                if (trim($alt) === '') {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The pluginfile-relative reference for a file - its filepath and name as
+     * they appear after "@@PLUGINFILE@@/" in embedding content (e.g. "pic.png"
+     * at the root, "sub/pic.png" in a folder). Used so tag matching can tell
+     * apart two files that share a basename in different folders.
+     *
+     * @param \stdClass $item An object exposing filepath and filename.
+     * @return string
+     */
+    public static function reference(\stdClass $item): string {
+        $filepath = ltrim((string) ($item->filepath ?? '/'), '/');
+        return $filepath . (string) $item->filename;
+    }
+
+    /**
      * Resolve which table/column/row holds the HTML that embeds this file, or
      * null when the file's area is not a mapped rich-text field.
      *
@@ -150,16 +190,17 @@ class htmllocator {
 
     /**
      * Extract the alt texts of every <img> in an HTML string that references
-     * the given file name. A file can be embedded more than once, so several
-     * alt values may come back (deduplicated, blanks kept as empty strings).
+     * the given file. A file can be embedded more than once, so several alt
+     * values may come back (deduplicated, blanks kept as empty strings).
      *
      * @param string $html
-     * @param string $filename
+     * @param string $reference The file's pluginfile-relative path (see
+     *                          reference()); a bare name for a root-level file.
      * @return string[] Alt values, in document order.
      */
-    public static function extract_alts(string $html, string $filename): array {
+    public static function extract_alts(string $html, string $reference): array {
         $alts = [];
-        foreach (self::img_tags_for($html, $filename) as $tag) {
+        foreach (self::img_tags_for($html, $reference) as $tag) {
             $alts[] = self::tag_alt($tag);
         }
         return array_values(array_unique($alts));
@@ -167,21 +208,22 @@ class htmllocator {
 
     /**
      * Rewrite the alt text of every <img> in an HTML string that references the
-     * given file name, leaving the rest of the markup byte-for-byte unchanged
-     * (only the matched tags' alt attributes are touched).
+     * given file, leaving the rest of the markup byte-for-byte unchanged (only
+     * the matched tags' alt attributes are touched).
      *
      * @param string $html
-     * @param string $filename
+     * @param string $reference The file's pluginfile-relative path (see
+     *                          reference()); a bare name for a root-level file.
      * @param string $alt The new alt text (plain text; encoded for us).
      * @return array [string $html, int $changed] The new HTML and how many
      *               <img> tags were updated.
      */
-    public static function set_alt(string $html, string $filename, string $alt): array {
+    public static function set_alt(string $html, string $reference, string $alt): array {
         $changed = 0;
         $encoded = s($alt);
-        $result = preg_replace_callback('/<img\b[^>]*>/i', function ($m) use ($filename, $encoded, &$changed) {
+        $result = preg_replace_callback('/<img\b[^>]*>/i', function ($m) use ($reference, $encoded, &$changed) {
             $tag = $m[0];
-            if (!self::tag_references($tag, $filename)) {
+            if (!self::tag_references($tag, $reference)) {
                 return $tag;
             }
             $newtag = self::tag_with_alt($tag, $encoded);
@@ -196,19 +238,19 @@ class htmllocator {
     }
 
     /**
-     * The <img> tags in an HTML string that reference the given file name.
+     * The <img> tags in an HTML string that reference the given file.
      *
      * @param string $html
-     * @param string $filename
+     * @param string $reference The file's pluginfile-relative path.
      * @return string[] Raw tag strings.
      */
-    protected static function img_tags_for(string $html, string $filename): array {
+    protected static function img_tags_for(string $html, string $reference): array {
         if (!preg_match_all('/<img\b[^>]*>/i', $html, $matches)) {
             return [];
         }
         $tags = [];
         foreach ($matches[0] as $tag) {
-            if (self::tag_references($tag, $filename)) {
+            if (self::tag_references($tag, $reference)) {
                 $tags[] = $tag;
             }
         }
@@ -216,15 +258,19 @@ class htmllocator {
     }
 
     /**
-     * Whether an <img> tag's src points at the given file name. The stored src
-     * is a pluginfile placeholder such as "@@PLUGINFILE@@/My%20Image.jpg", so
-     * the value is URL-decoded and compared on its final path segment.
+     * Whether an <img> tag's src points at the given file. The stored src is a
+     * pluginfile placeholder such as "@@PLUGINFILE@@/sub/My%20Image.jpg", so
+     * the value is URL-decoded and the path AFTER the placeholder is matched
+     * exactly against the file's pluginfile-relative reference (its filepath
+     * and name) - so two files that share a basename in different folders are
+     * told apart.
      *
      * @param string $tag
-     * @param string $filename
+     * @param string $reference The file's pluginfile-relative path (e.g.
+     *                          "sub/pic.png", or just "pic.png" at the root).
      * @return bool
      */
-    protected static function tag_references(string $tag, string $filename): bool {
+    protected static function tag_references(string $tag, string $reference): bool {
         if (!preg_match('/\bsrc\s*=\s*("([^"]*)"|\'([^\']*)\')/i', $tag, $m)) {
             return false;
         }
@@ -232,8 +278,19 @@ class htmllocator {
         // Drop any query string or fragment, then decode percent-escapes.
         $src = preg_replace('/[?#].*$/', '', $src);
         $src = rawurldecode(html_entity_decode($src, ENT_QUOTES));
-        $needle = '/' . $filename;
-        return $src === $filename || substr($src, -strlen($needle)) === $needle;
+        $reference = ltrim($reference, '/');
+
+        // Stored content references the file through a "@@PLUGINFILE@@/..."
+        // placeholder: match the path after it exactly.
+        $marker = '@@PLUGINFILE@@/';
+        $pos = strpos($src, $marker);
+        if ($pos !== false) {
+            return substr($src, $pos + strlen($marker)) === $reference;
+        }
+        // A rendered pluginfile URL (or any other src): fall back to a
+        // path-suffix match on the reference.
+        $needle = '/' . $reference;
+        return $src === $reference || substr($src, -strlen($needle)) === $needle;
     }
 
     /**

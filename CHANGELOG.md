@@ -6,6 +6,27 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.17.0-beta] — 2026-07-15
+
+Build `2026071502`.
+
+### Added
+- **"Only images with a missing description" search refinement.** A new job
+  criterion (alongside "Only broken or missing files") keeps only images that
+  are displayed in content through an `<img>` tag with an empty or missing
+  `alt` attribute — a first-class accessibility audit filter. It is applied as
+  a post-match refinement (the file table's SQL cannot see into HTML), mirroring
+  how "missing only" works. Combine it with Extract to download a manifest of
+  the undescribed images, or with the alt-text replace to give them
+  descriptions. New `altmissing` job field.
+- **Alt-text replaces are now reversible.** With "Back up originals" enabled
+  (the default), an alt-text replace saves the original HTML of each changed
+  field to a new `tool_imageextractor_htmlbackup` table, and Restore writes it
+  back field-for-field before marking the job restored — the same admin-only,
+  confirmed, backup-and-restore treatment as a content replace. The re-run
+  guard applies too, so an applied alt-text job must be restored or cleared
+  before it can run again.
+
 ## [0.16.0-beta] — 2026-07-15
 
 Build `2026071501`.

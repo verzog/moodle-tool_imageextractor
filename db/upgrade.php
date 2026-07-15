@@ -112,5 +112,33 @@ function xmldb_tool_imageextractor_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026071501, 'tool', 'imageextractor');
     }
 
+    if ($oldversion < 2026071502) {
+        // The "missing alt text" accessibility refinement (select only images
+        // embedded via an img tag with an empty/missing alt).
+        $table = new xmldb_table('tool_imageextractor_job');
+        $field = new xmldb_field('altmissing', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'missingonly');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // The per-field HTML backup that makes an alt-text replace reversible.
+        $table = new xmldb_table('tool_imageextractor_htmlbackup');
+        if (!$dbman->table_exists($table)) {
+            $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+            $table->add_field('jobid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('tablename', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('columnname', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('rowid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('oldcontent', XMLDB_TYPE_TEXT, null, null, null, null, null);
+            $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+            $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+            $table->add_key('jobid', XMLDB_KEY_FOREIGN, ['jobid'], 'tool_imageextractor_job', ['id']);
+            $table->add_index('jobid-field', XMLDB_INDEX_UNIQUE, ['jobid', 'tablename', 'columnname', 'rowid']);
+            $dbman->create_table($table);
+        }
+
+        upgrade_plugin_savepoint(true, 2026071502, 'tool', 'imageextractor');
+    }
+
     return true;
 }

@@ -101,6 +101,15 @@ class job_form extends \moodleform {
             get_string('missingonly_help', 'tool_imageextractor')
         );
 
+        // An accessibility refinement: keep only images that are displayed in
+        // content through an <img> tag with an empty or missing alt attribute.
+        $mform->addElement(
+            'advcheckbox',
+            'altmissing',
+            get_string('altmissing', 'tool_imageextractor'),
+            get_string('altmissing_help', 'tool_imageextractor')
+        );
+
         $this->add_action_buttons();
     }
 

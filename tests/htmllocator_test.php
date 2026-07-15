@@ -134,4 +134,90 @@ final class htmllocator_test extends \advanced_testcase {
         $stored = $DB->get_field('page', 'content', ['id' => $page->id]);
         $this->assertStringContainsString('alt="new alt"', $stored);
     }
+
+    /**
+     * is_undescribed() flags an image embedded via an <img> with an empty or
+     * missing alt, but not one that is described everywhere, nor one that is
+     * not embedded in a mapped field at all.
+     */
+    public function test_is_undescribed(): void {
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course();
+        $page = $this->getDataGenerator()->create_module('page', [
+            'course'        => $course->id,
+            'content'       => '<p><img src="@@PLUGINFILE@@/described.png" alt="a red car">'
+                . '<img src="@@PLUGINFILE@@/bare.png"></p>',
+            'contentformat' => FORMAT_HTML,
+        ]);
+        $modcontext = \context_module::instance($page->cmid);
+        foreach (['described.png', 'bare.png'] as $name) {
+            get_file_storage()->create_file_from_string([
+                'contextid' => $modcontext->id,
+                'component' => 'mod_page',
+                'filearea'  => 'content',
+                'itemid'    => 0,
+                'filepath'  => '/',
+                'filename'  => $name,
+            ], 'PNGDATA');
+        }
+
+        $ref = function (string $filename) use ($modcontext): \stdClass {
+            return (object) [
+                'component'  => 'mod_page',
+                'filearea'   => 'content',
+                'contextid'  => $modcontext->id,
+                'fileitemid' => 0,
+                'filename'   => $filename,
+            ];
+        };
+
+        $this->assertFalse(htmllocator::is_undescribed($ref('described.png')));
+        $this->assertTrue(htmllocator::is_undescribed($ref('bare.png')));
+        // Not embedded anywhere: not an undescribed usage.
+        $this->assertFalse(htmllocator::is_undescribed($ref('ghost.png')));
+    }
+
+    /**
+     * Two files sharing a basename in different folders are told apart: the
+     * described one is not flagged just because a same-named file elsewhere in
+     * the field lacks a description (matching is by full pluginfile path).
+     */
+    public function test_is_undescribed_same_basename_different_paths(): void {
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course();
+        $page = $this->getDataGenerator()->create_module('page', [
+            'course'        => $course->id,
+            'content'       => '<p><img src="@@PLUGINFILE@@/a/pic.png" alt="described">'
+                . '<img src="@@PLUGINFILE@@/b/pic.png"></p>',
+            'contentformat' => FORMAT_HTML,
+        ]);
+        $modcontext = \context_module::instance($page->cmid);
+        foreach (['/a/', '/b/'] as $filepath) {
+            get_file_storage()->create_file_from_string([
+                'contextid' => $modcontext->id,
+                'component' => 'mod_page',
+                'filearea'  => 'content',
+                'itemid'    => 0,
+                'filepath'  => $filepath,
+                'filename'  => 'pic.png',
+            ], 'PNGDATA');
+        }
+
+        $mk = function (string $filepath) use ($modcontext): \stdClass {
+            return (object) [
+                'component'  => 'mod_page',
+                'filearea'   => 'content',
+                'contextid'  => $modcontext->id,
+                'fileitemid' => 0,
+                'filepath'   => $filepath,
+                'filename'   => 'pic.png',
+            ];
+        };
+
+        // The /a/ copy is described; only the /b/ copy is undescribed.
+        $this->assertFalse(htmllocator::is_undescribed($mk('/a/')));
+        $this->assertTrue(htmllocator::is_undescribed($mk('/b/')));
+    }
 }

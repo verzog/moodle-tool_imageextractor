@@ -159,9 +159,10 @@ function tool_imageextractor_render_replace_preview(stdClass $job, moodle_url $v
                 get_string('colnewalt', 'tool_imageextractor'),
             ];
             foreach ($review['rows'] as $prow) {
+                $reference = \tool_imageextractor\htmllocator::reference($prow);
                 $current = [];
                 foreach (\tool_imageextractor\htmllocator::locate($prow) as $loc) {
-                    foreach (\tool_imageextractor\htmllocator::extract_alts($loc->html, $prow->filename) as $a) {
+                    foreach (\tool_imageextractor\htmllocator::extract_alts($loc->html, $reference) as $a) {
                         $current[] = $a;
                     }
                 }
