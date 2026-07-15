@@ -220,4 +220,60 @@ final class htmllocator_test extends \advanced_testcase {
         $this->assertFalse(htmllocator::is_undescribed($mk('/a/')));
         $this->assertTrue(htmllocator::is_undescribed($mk('/b/')));
     }
+
+    /**
+     * A course-category description is located from the category context.
+     */
+    public function test_locate_course_category_description(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $category = $this->getDataGenerator()->create_category([
+            'description'       => '<p><img src="@@PLUGINFILE@@/cat.png" alt="cat"></p>',
+            'descriptionformat' => FORMAT_HTML,
+        ]);
+        $item = (object) [
+            'component'  => 'coursecat',
+            'filearea'   => 'description',
+            'contextid'  => \context_coursecat::instance($category->id)->id,
+            'fileitemid' => 0,
+            'filepath'   => '/',
+            'filename'   => 'cat.png',
+        ];
+
+        $locations = htmllocator::locate($item);
+        $this->assertCount(1, $locations);
+        $this->assertSame('course_categories', $locations[0]->table);
+        $this->assertSame('description', $locations[0]->column);
+        $this->assertSame((int) $category->id, $locations[0]->id);
+        $this->assertSame(['cat'], htmllocator::extract_alts($locations[0]->html, 'cat.png'));
+    }
+
+    /**
+     * A user profile description is located from the user context.
+     */
+    public function test_locate_user_description(): void {
+        $this->resetAfterTest();
+
+        $user = $this->getDataGenerator()->create_user([
+            'description'       => '<p><img src="@@PLUGINFILE@@/me.png"></p>',
+            'descriptionformat' => FORMAT_HTML,
+        ]);
+        $item = (object) [
+            'component'  => 'user',
+            'filearea'   => 'profile',
+            'contextid'  => \context_user::instance($user->id)->id,
+            'fileitemid' => 0,
+            'filepath'   => '/',
+            'filename'   => 'me.png',
+        ];
+
+        $locations = htmllocator::locate($item);
+        $this->assertCount(1, $locations);
+        $this->assertSame('user', $locations[0]->table);
+        $this->assertSame('description', $locations[0]->column);
+        $this->assertSame((int) $user->id, $locations[0]->id);
+        // The image has no alt, so the profile picture is flagged undescribed.
+        $this->assertTrue(htmllocator::is_undescribed($item));
+    }
 }

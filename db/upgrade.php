@@ -140,5 +140,28 @@ function xmldb_tool_imageextractor_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026071502, 'tool', 'imageextractor');
     }
 
+    if ($oldversion < 2026071503) {
+        // Resumable chunked-upload sessions for large replacement files.
+        $table = new xmldb_table('tool_imageextractor_upload');
+        if (!$dbman->table_exists($table)) {
+            $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+            $table->add_field('token', XMLDB_TYPE_CHAR, '40', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('userid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('jobid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('filename', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null);
+            $table->add_field('filesize', XMLDB_TYPE_INTEGER, '20', null, XMLDB_NOTNULL, null, '0');
+            $table->add_field('uploadedbytes', XMLDB_TYPE_INTEGER, '20', null, XMLDB_NOTNULL, null, '0');
+            $table->add_field('chunks', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+            $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+            $table->add_field('timemodified', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+            $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+            $table->add_key('jobid', XMLDB_KEY_FOREIGN, ['jobid'], 'tool_imageextractor_job', ['id']);
+            $table->add_index('token', XMLDB_INDEX_UNIQUE, ['token']);
+            $dbman->create_table($table);
+        }
+
+        upgrade_plugin_savepoint(true, 2026071503, 'tool', 'imageextractor');
+    }
+
     return true;
 }

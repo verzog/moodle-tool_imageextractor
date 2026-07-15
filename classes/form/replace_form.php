@@ -86,6 +86,24 @@ class replace_form extends \moodleform {
         $mform->hideIf('replacementzip', 'replacemode', 'eq', 'metadata');
         $mform->hideIf('replacementzip', 'replacemode', 'eq', 'alttext');
 
+        // Resumable chunked upload: for a single source file (image or ZIP)
+        // larger than the site's upload limit, the browser slices it and sends
+        // it a chunk at a time to upload.php, which assembles it straight into
+        // this job's replacement area. A hidden flag records that it finished so
+        // the normal upload requirement is waived on submit.
+        $mform->addElement(
+            'static',
+            'chunkuploadwidget',
+            get_string('chunkupload', 'tool_imageextractor'),
+            $this->chunk_widget((int) ($this->_customdata['id'] ?? 0))
+        );
+        $mform->addHelpButton('chunkuploadwidget', 'chunkupload', 'tool_imageextractor');
+        $mform->hideIf('chunkuploadwidget', 'replacemode', 'eq', 'metadata');
+        $mform->hideIf('chunkuploadwidget', 'replacemode', 'eq', 'alttext');
+
+        $mform->addElement('hidden', 'chunkdone', 0);
+        $mform->setType('chunkdone', PARAM_INT);
+
         // Alt-text mode: a CSV mapping each file name to the description to
         // write. The exported manifest (filename + alttext columns) is the
         // natural starting point - edit its alttext column and upload it here.
@@ -172,6 +190,49 @@ class replace_form extends \moodleform {
     }
 
     /**
+     * Build the chunked-upload widget markup: a file picker, a start button, a
+     * progress bar and a status line, carrying the endpoint, session key, job
+     * id and chunk size the browser script (js/chunkupload.js) reads.
+     *
+     * @param int $jobid
+     * @return string HTML.
+     */
+    protected function chunk_widget(int $jobid): string {
+        $chunkmb = (int) get_config('tool_imageextractor', 'chunk_size_mb');
+        $chunkbytes = ($chunkmb > 0 ? $chunkmb : 5) * 1024 * 1024;
+
+        $inner = \html_writer::empty_tag('input', [
+            'type'  => 'file',
+            'class' => 'mr-2',
+            'accept' => '.zip,.png,.jpg,.jpeg,.gif,.webp',
+        ]);
+        $inner .= \html_writer::tag('button', get_string('chunkuploadbutton', 'tool_imageextractor'), [
+            'type'         => 'button',
+            'data-action'  => 'upload',
+            'class'        => 'btn btn-secondary',
+        ]);
+        $inner .= \html_writer::tag('progress', '', [
+            'value'  => 0,
+            'max'    => 100,
+            'hidden' => 'hidden',
+            'class'  => 'ml-2',
+        ]);
+        $inner .= \html_writer::tag('span', '', ['data-region' => 'status', 'class' => 'ml-2']);
+        $inner .= \html_writer::div(get_string('chunkuploadintro', 'tool_imageextractor'), 'small text-muted mt-1');
+
+        return \html_writer::div($inner, 'tool-imageextractor-chunkupload', [
+            'data-endpoint'     => (new \moodle_url('/admin/tool/imageextractor/upload.php'))->out(false),
+            'data-sesskey'      => sesskey(),
+            'data-jobid'        => $jobid,
+            'data-chunksize'    => $chunkbytes,
+            'data-donefield'    => 'id_chunkdone',
+            'data-str-nofile'   => get_string('chunkuploadnofile', 'tool_imageextractor'),
+            'data-str-complete' => get_string('chunkuploadcomplete', 'tool_imageextractor'),
+            'data-str-error'    => get_string('chunkuploaderror', 'tool_imageextractor'),
+        ]);
+    }
+
+    /**
      * Validate that a replacement source for the chosen mode was uploaded.
      *
      * @param array $data
@@ -218,6 +279,12 @@ class replace_form extends \moodleform {
             if ($quality < 1 || $quality > 100) {
                 $errors['optimizequality'] = get_string('erroroptimizequality', 'tool_imageextractor');
             }
+        }
+
+        // A completed chunked upload has already assembled the source straight
+        // into the replacement area, so no picker upload is required.
+        if (!empty($data['chunkdone'])) {
+            return $errors;
         }
 
         // The upload is checked by inspecting the submitted draft area, NOT via

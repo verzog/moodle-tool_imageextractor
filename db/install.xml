@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="admin/tool/imageextractor/db" VERSION="2026071502" COMMENT="Find images in the file storage and export, or restore/replace, them with metadata and naming rules."
+<XMLDB PATH="admin/tool/imageextractor/db" VERSION="2026071503" COMMENT="Find images in the file storage and export, or restore/replace, them with metadata and naming rules."
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../../lib/xmldb/xmldb.xsd">
   <TABLES>
@@ -101,6 +101,27 @@
       </KEYS>
       <INDEXES>
         <INDEX NAME="jobid-sequence" UNIQUE="false" FIELDS="jobid, sequence"/>
+      </INDEXES>
+    </TABLE>
+    <TABLE NAME="tool_imageextractor_upload" COMMENT="A resumable chunked upload of a large replacement file, assembled server-side to bypass the per-request upload limit.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="token" TYPE="char" LENGTH="40" NOTNULL="true" SEQUENCE="false" COMMENT="Random token identifying the upload session."/>
+        <FIELD NAME="userid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The user who owns the upload session."/>
+        <FIELD NAME="jobid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="The replace job the assembled file will be applied to."/>
+        <FIELD NAME="filename" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false"/>
+        <FIELD NAME="filesize" TYPE="int" LENGTH="20" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="The full size the assembled file should reach."/>
+        <FIELD NAME="uploadedbytes" TYPE="int" LENGTH="20" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Bytes received so far (the resume point)."/>
+        <FIELD NAME="chunks" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Chunks stored so far."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="timemodified" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="jobid" TYPE="foreign" FIELDS="jobid" REFTABLE="tool_imageextractor_job" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="token" UNIQUE="true" FIELDS="token"/>
       </INDEXES>
     </TABLE>
     <TABLE NAME="tool_imageextractor_htmlbackup" COMMENT="Original HTML of a content field before an alt-text replace changed it, so the change can be undone.">
