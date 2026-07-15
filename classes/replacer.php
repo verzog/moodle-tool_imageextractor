@@ -100,17 +100,22 @@ class replacer {
         $rs = $matcher->get_recordset(false);
 
         $scanned = 0;
+        $examined = 0;
         $willreplace = 0;
         $willskip = 0;
         $truncated = false;
         $rows = [];
         foreach ($rs as $file) {
-            if ($scanned >= $scancap) {
+            // Bound the dry run by candidates EXAMINED, not just those kept: a
+            // refinement (missing content / missing alt) that rejects most
+            // files must not let the loop - and its per-file HTML/content
+            // lookups - walk the entire matched set on a large site.
+            if ($examined >= $scancap) {
                 $truncated = true;
                 break;
             }
-            // Apply the post-match refinements (missing content / missing alt);
-            // each only queries when its refinement is switched on.
+            $examined++;
+            // Each refinement only queries when it is switched on.
             if (!$this->passes_refinements($file)) {
                 continue;
             }
@@ -165,6 +170,7 @@ class replacer {
                 'filearea'   => $file->filearea,
                 'contextid'  => (int) $file->contextid,
                 'fileitemid' => (int) $file->itemid,
+                'filepath'   => $file->filepath,
                 'filename'   => $file->filename,
             ];
             if (!htmllocator::is_undescribed($ref)) {
@@ -504,13 +510,14 @@ class replacer {
                     ]);
                     continue;
                 }
+                $reference = htmllocator::reference($item);
                 $oldalts = [];
                 $changed = 0;
                 foreach ($locations as $location) {
-                    foreach (htmllocator::extract_alts($location->html, $item->filename) as $old) {
+                    foreach (htmllocator::extract_alts($location->html, $reference) as $old) {
                         $oldalts[] = $old;
                     }
-                    [$newhtml, $n] = htmllocator::set_alt($location->html, $item->filename, $newalt);
+                    [$newhtml, $n] = htmllocator::set_alt($location->html, $reference, $newalt);
                     if ($n > 0 && $newhtml !== $location->html) {
                         // Back up the field's original HTML (once per job) so
                         // the whole change can be reverted with Restore.
@@ -617,10 +624,13 @@ class replacer {
         try {
             $DB->insert_record('tool_imageextractor_htmlbackup', $record);
         } catch (\dml_exception $e) {
-            // A concurrent batch backed up the same field first; the unique
-            // (jobid, table, column, row) index rejected this duplicate, which
-            // is exactly the intended outcome.
-            unset($e);
+            // Suppress ONLY the duplicate-key race (a concurrent batch backed
+            // up the same field first, so the row now exists). Any other DB
+            // error is real - rethrow it so the caller aborts before writing
+            // the new HTML, rather than leaving a change with no backup.
+            if (!$DB->record_exists('tool_imageextractor_htmlbackup', $key)) {
+                throw $e;
+            }
         }
     }
 
@@ -644,12 +654,12 @@ class replacer {
             $limit
         );
         foreach ($backups as $backup) {
-            try {
-                $DB->set_field($backup->tablename, $backup->columnname, $backup->oldcontent, ['id' => $backup->rowid]);
-            } catch (\Throwable $e) {
-                mtrace('tool_imageextractor: alt-text restore failed for ' .
-                    $backup->tablename . '.' . $backup->columnname . ' #' . $backup->rowid . ': ' . $e->getMessage());
-            }
+            // Write the original HTML back, and drop the backup ONLY once that
+            // write has succeeded. If it throws (e.g. a transient DB error) the
+            // exception propagates: the processing task marks the job failed
+            // with the backups intact, so the restore can be retried and never
+            // reports a success it did not achieve.
+            $DB->set_field($backup->tablename, $backup->columnname, $backup->oldcontent, ['id' => $backup->rowid]);
             $DB->delete_records('tool_imageextractor_htmlbackup', ['id' => $backup->id]);
         }
 

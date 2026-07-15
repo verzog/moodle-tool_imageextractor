@@ -595,6 +595,7 @@ class process_job extends \core\task\adhoc_task {
             'filearea'   => $file->filearea,
             'contextid'  => (int) $file->contextid,
             'fileitemid' => (int) $file->itemid,
+            'filepath'   => $file->filepath,
             'filename'   => $file->filename,
         ]);
     }
@@ -613,9 +614,10 @@ class process_job extends \core\task\adhoc_task {
         if (strpos((string) $item->mimetype, 'image/') !== 0) {
             return '';
         }
+        $reference = \tool_imageextractor\htmllocator::reference($item);
         $alts = [];
         foreach (\tool_imageextractor\htmllocator::locate($item) as $location) {
-            foreach (\tool_imageextractor\htmllocator::extract_alts($location->html, $item->filename) as $alt) {
+            foreach (\tool_imageextractor\htmllocator::extract_alts($location->html, $reference) as $alt) {
                 if (trim($alt) !== '' && !in_array($alt, $alts, true)) {
                     $alts[] = $alt;
                 }
