@@ -347,7 +347,10 @@ final class replacer_test extends \advanced_testcase {
         $stored = $fs->get_file($context->id, 'mod_label', 'intro', 0, '/', 'logo.png');
         // Content untouched and the file was updated in place, not recreated.
         $this->assertSame('ORIGINAL', $stored->get_content());
-        $this->assertSame($target->get_id(), $stored->get_id());
+        // Same file id: the metadata update happens in place, it does not
+        // delete and recreate the file. Cast because a DB-loaded stored_file
+        // reports its id as a string on some drivers (e.g. PostgreSQL).
+        $this->assertSame((int) $target->get_id(), (int) $stored->get_id());
         $this->assertSame('New Author', $stored->get_author());
         $this->assertSame('public', $stored->get_license());
 
