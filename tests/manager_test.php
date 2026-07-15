@@ -234,6 +234,37 @@ final class manager_test extends \advanced_testcase {
     }
 
     /**
+     * The replacement image count is the number of distinct basenames in the
+     * job's replacement area (a ZIP source unpacks into per-chunk folders and
+     * matches by basename), and 0 when nothing is stored.
+     */
+    public function test_replacement_file_count(): void {
+        $this->resetAfterTest();
+        $this->setAdminUser();
+
+        $result = manager::save_job((object) ['name' => 'Count']);
+        $jobid = $result['id'];
+
+        // Nothing uploaded yet.
+        $this->assertSame(0, manager::replacement_file_count($jobid));
+
+        // Two ZIP chunks unpack into their own folders; the same basename in
+        // both counts once, so three files across two folders is two images.
+        $fs = get_file_storage();
+        $base = [
+            'contextid' => \context_system::instance()->id,
+            'component' => manager::COMPONENT,
+            'filearea'  => 'replacement',
+            'itemid'    => $jobid,
+        ];
+        $fs->create_file_from_string($base + ['filepath' => '/chunk1/', 'filename' => 'a.png'], 'A');
+        $fs->create_file_from_string($base + ['filepath' => '/chunk1/', 'filename' => 'b.png'], 'B');
+        $fs->create_file_from_string($base + ['filepath' => '/chunk2/', 'filename' => 'a.png'], 'A2');
+
+        $this->assertSame(2, manager::replacement_file_count($jobid));
+    }
+
+    /**
      * A per-row-criteria CSV replace job is refused by the queue path itself
      * (not just the results page), so it cannot be applied from the CLI.
      */

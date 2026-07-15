@@ -309,8 +309,16 @@ if ($isreplace) {
             $summary->data[] = [get_string('metalicense', 'tool_imageextractor'), s($job->metalicense)];
         }
     } else if ($job->replacemode !== 'alttext') {
-        // Content replace (single/zip): show backup and any optimization.
-        // Alt-text mode touches neither content nor files, so it shows nothing.
+        // Content replace (single/zip): show the uploaded source's file count,
+        // backup and any optimization. Alt-text mode touches neither content
+        // nor files, so it shows nothing.
+        $replacementcount = manager::replacement_file_count($id);
+        if ($replacementcount > 0) {
+            // A ZIP source only replaces matched files whose basename it carries,
+            // so surfacing "51 replacement images" against "407 matched files"
+            // makes plain that the remainder are left unchanged.
+            $summary->data[] = [get_string('replacementfilecount', 'tool_imageextractor'), $replacementcount];
+        }
         $summary->data[] = [get_string('backup', 'tool_imageextractor'),
             $job->backup ? get_string('yes') : get_string('no')];
         if ((int) $job->optimizemaxpx > 0) {
