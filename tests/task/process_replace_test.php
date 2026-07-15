@@ -24,6 +24,8 @@ namespace tool_imageextractor\task;
 use tool_imageextractor\manager;
 use tool_imageextractor\replace_job_maker;
 
+defined('MOODLE_INTERNAL') || die();
+
 require_once(__DIR__ . '/../fixtures/replace_job_maker.php');
 
 /**

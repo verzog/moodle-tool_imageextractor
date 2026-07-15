@@ -21,6 +21,8 @@
 
 namespace tool_imageextractor;
 
+defined('MOODLE_INTERNAL') || die();
+
 require_once(__DIR__ . '/fixtures/replace_job_maker.php');
 
 /**
