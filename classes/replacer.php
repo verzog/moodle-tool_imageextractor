@@ -46,6 +46,9 @@ class replacer {
     /** @var array|null Cached zip-mode map of basename => stored_file. */
     protected $zipmap = null;
 
+    /** @var array|null Cached alt-text map of filename => description. */
+    protected $altmap = null;
+
     /**
      * Constructor.
      *
@@ -221,30 +224,14 @@ class replacer {
             }
 
             // The match is type-agnostic: it records the file as a pending item
-            // without resolving a replacement or computing an output name. The
-            // extract action names it at pack time; the replace action resolves
-            // (and possibly skips) it at apply time.
-            $item = new \stdClass();
-            $item->jobid = (int) $this->job->id;
-            $item->fileid = (int) $file->id;
-            $item->contenthash = $file->contenthash;
-            $item->filename = $file->filename;
-            $item->filesize = (int) $file->filesize;
-            $item->mimetype = $file->mimetype;
-            $item->contextid = (int) $file->contextid;
-            $item->component = $file->component;
-            $item->filearea = $file->filearea;
-            $item->filepath = $file->filepath;
-            $item->fileitemid = (int) $file->itemid;
-            $item->uploaderid = (int) $file->userid;
-            $item->filetimecreated = (int) $file->timecreated;
+            // without resolving a course, replacement or computing an output
+            // name. The extract action names it at pack time; the replace
+            // action resolves (and possibly skips) it at apply time.
+            $item = manager::item_from_file((int) $this->job->id, $file);
             $item->courseid = 0;
             $item->outputname = '';
             $item->replacementname = null;
             $item->note = null;
-            $item->volume = 0;
-            $item->status = 'pending';
-            $item->timeprocessed = 0;
             $batch[] = $item;
 
             $matched++;
@@ -274,6 +261,18 @@ class replacer {
      */
     public function apply_batch(int $limit): int {
         global $DB;
+
+        // Metadata-only jobs never touch content; they stamp the new author
+        // and/or license onto each matched file instead.
+        if ($this->job->replacemode === 'metadata') {
+            return $this->apply_metadata_batch($limit);
+        }
+
+        // Alt-text jobs never touch content either; they rewrite the image's
+        // description in the HTML that embeds it.
+        if ($this->job->replacemode === 'alttext') {
+            return $this->apply_alttext_batch($limit);
+        }
 
         $items = $DB->get_records(
             'tool_imageextractor_item',
@@ -343,6 +342,434 @@ class replacer {
     }
 
     /**
+     * Metadata-only apply: set the job's new author and/or license on up to
+     * $limit pending targets, without touching their content. Nothing is
+     * backed up because nothing destructive happens to the image data; the
+     * per-item note records the old values for reference.
+     *
+     * @param int $limit
+     * @return int Number of targets still pending after this batch.
+     */
+    protected function apply_metadata_batch(int $limit): int {
+        global $DB;
+
+        $newauthor = trim((string) ($this->job->metaauthor ?? ''));
+        $newlicense = trim((string) ($this->job->metalicense ?? ''));
+
+        $items = $DB->get_records(
+            'tool_imageextractor_item',
+            ['jobid' => $this->job->id, 'status' => 'pending'],
+            'id ASC',
+            '*',
+            0,
+            $limit
+        );
+
+        $done = 0;
+        $failed = 0;
+        foreach ($items as $item) {
+            $stored = $this->fs->get_file(
+                $item->contextid,
+                $item->component,
+                $item->filearea,
+                (int) $item->fileitemid,
+                $item->filepath,
+                $item->filename
+            );
+            if (!$stored) {
+                $DB->update_record('tool_imageextractor_item', (object) [
+                    'id'            => $item->id,
+                    'status'        => 'skipped',
+                    'timeprocessed' => time(),
+                    'note'          => get_string('targetmissing', 'tool_imageextractor'),
+                ]);
+                continue;
+            }
+            try {
+                $notes = [];
+                if ($newauthor !== '') {
+                    $notes[] = 'author: ' . (string) $stored->get_author() . ' -> ' . $newauthor;
+                    $stored->set_author($newauthor);
+                }
+                if ($newlicense !== '') {
+                    $notes[] = 'license: ' . (string) $stored->get_license() . ' -> ' . $newlicense;
+                    $stored->set_license($newlicense);
+                }
+                $DB->update_record('tool_imageextractor_item', (object) [
+                    'id'            => $item->id,
+                    'status'        => 'done',
+                    'timeprocessed' => time(),
+                    'note'          => \core_text::substr(implode('; ', $notes), 0, 255),
+                ]);
+                $done++;
+            } catch (\Throwable $e) {
+                $DB->update_record('tool_imageextractor_item', (object) [
+                    'id'            => $item->id,
+                    'status'        => 'failed',
+                    'timeprocessed' => time(),
+                    'note'          => $e->getMessage(),
+                ]);
+                $failed++;
+                mtrace('tool_imageextractor: metadata update failed for item ' . $item->id . ': ' . $e->getMessage());
+            }
+        }
+
+        if ($done) {
+            $DB->execute(
+                'UPDATE {tool_imageextractor_job} SET processedcount = processedcount + :c WHERE id = :id',
+                ['c' => $done, 'id' => $this->job->id]
+            );
+        }
+        if ($failed) {
+            $DB->execute(
+                'UPDATE {tool_imageextractor_job} SET failedcount = failedcount + :c WHERE id = :id',
+                ['c' => $failed, 'id' => $this->job->id]
+            );
+        }
+
+        return $DB->count_records(
+            'tool_imageextractor_item',
+            ['jobid' => $this->job->id, 'status' => 'pending']
+        );
+    }
+
+    /**
+     * Alt-text apply: rewrite the description of up to $limit pending targets
+     * in the HTML that embeds them, using the job's uploaded filename->alt CSV.
+     * Content is never touched. A file with no CSV entry, or that is not
+     * embedded in a mapped HTML field, is skipped; the previous alt text is
+     * recorded in the item note so the change is auditable.
+     *
+     * @param int $limit
+     * @return int Number of targets still pending after this batch.
+     */
+    protected function apply_alttext_batch(int $limit): int {
+        global $DB;
+
+        $map = $this->alt_map();
+
+        $items = $DB->get_records(
+            'tool_imageextractor_item',
+            ['jobid' => $this->job->id, 'status' => 'pending'],
+            'id ASC',
+            '*',
+            0,
+            $limit
+        );
+
+        $done = 0;
+        $failed = 0;
+        foreach ($items as $item) {
+            // The CSV is keyed by file name; a target the admin did not list is
+            // left untouched (an expected outcome, not a failure).
+            if (!array_key_exists($item->filename, $map)) {
+                $DB->update_record('tool_imageextractor_item', (object) [
+                    'id'            => $item->id,
+                    'status'        => 'skipped',
+                    'timeprocessed' => time(),
+                    'note'          => get_string('altnomapping', 'tool_imageextractor'),
+                ]);
+                continue;
+            }
+            $newalt = $map[$item->filename];
+            try {
+                $locations = htmllocator::locate($item);
+                if (!$locations) {
+                    $DB->update_record('tool_imageextractor_item', (object) [
+                        'id'            => $item->id,
+                        'status'        => 'skipped',
+                        'timeprocessed' => time(),
+                        'note'          => get_string('altnotembedded', 'tool_imageextractor'),
+                    ]);
+                    continue;
+                }
+                $oldalts = [];
+                $changed = 0;
+                foreach ($locations as $location) {
+                    foreach (htmllocator::extract_alts($location->html, $item->filename) as $old) {
+                        $oldalts[] = $old;
+                    }
+                    [$newhtml, $n] = htmllocator::set_alt($location->html, $item->filename, $newalt);
+                    if ($n > 0 && $newhtml !== $location->html) {
+                        $DB->set_field($location->table, $location->column, $newhtml, ['id' => $location->id]);
+                        $changed += $n;
+                    }
+                }
+                if ($changed === 0) {
+                    $DB->update_record('tool_imageextractor_item', (object) [
+                        'id'            => $item->id,
+                        'status'        => 'skipped',
+                        'timeprocessed' => time(),
+                        'note'          => get_string('altnotembedded', 'tool_imageextractor'),
+                    ]);
+                    continue;
+                }
+                $prevdesc = \core_text::substr(implode(' | ', array_unique($oldalts)), 0, 200);
+                $oldnote = get_string('altwas', 'tool_imageextractor', $prevdesc);
+                $DB->update_record('tool_imageextractor_item', (object) [
+                    'id'            => $item->id,
+                    'status'        => 'done',
+                    'timeprocessed' => time(),
+                    'note'          => \core_text::substr($oldnote, 0, 255),
+                ]);
+                $done++;
+            } catch (\Throwable $e) {
+                $DB->update_record('tool_imageextractor_item', (object) [
+                    'id'            => $item->id,
+                    'status'        => 'failed',
+                    'timeprocessed' => time(),
+                    'note'          => $e->getMessage(),
+                ]);
+                $failed++;
+                mtrace('tool_imageextractor: alt-text update failed for item ' . $item->id . ': ' . $e->getMessage());
+            }
+        }
+
+        if ($done) {
+            $DB->execute(
+                'UPDATE {tool_imageextractor_job} SET processedcount = processedcount + :c WHERE id = :id',
+                ['c' => $done, 'id' => $this->job->id]
+            );
+        }
+        if ($failed) {
+            $DB->execute(
+                'UPDATE {tool_imageextractor_job} SET failedcount = failedcount + :c WHERE id = :id',
+                ['c' => $failed, 'id' => $this->job->id]
+            );
+        }
+
+        return $DB->count_records(
+            'tool_imageextractor_item',
+            ['jobid' => $this->job->id, 'status' => 'pending']
+        );
+    }
+
+    /**
+     * The description the alt-text CSV would write for a target file name, or
+     * null when the CSV does not list it. Public wrapper over the same map the
+     * apply uses, so the confirmation preview can show the planned change.
+     *
+     * @param string $filename
+     * @return string|null
+     */
+    public function planned_alt(string $filename): ?string {
+        $map = $this->alt_map();
+        return array_key_exists($filename, $map) ? $map[$filename] : null;
+    }
+
+    /**
+     * Load and cache the job's alt-text map (file name => description) from its
+     * uploaded CSV. The CSV needs a "filename" column and an "alttext" column;
+     * the exported manifest already carries both, so an edited manifest drops
+     * straight in. A row with a blank alttext maps to '' (clear the alt), which
+     * is deliberately distinct from a file the CSV never lists (left untouched).
+     *
+     * @return array
+     */
+    protected function alt_map(): array {
+        if ($this->altmap !== null) {
+            return $this->altmap;
+        }
+        $this->altmap = [];
+        $files = $this->fs->get_area_files(
+            $this->context->id,
+            manager::COMPONENT,
+            'altcsv',
+            (int) $this->job->id,
+            'id',
+            false
+        );
+        $csv = null;
+        foreach ($files as $file) {
+            $csv = $file;
+            break;
+        }
+        if (!$csv) {
+            return $this->altmap;
+        }
+        foreach (csv_importer::parse_rows($csv->get_content()) as $row) {
+            $filename = trim((string) ($row['filename'] ?? ''));
+            if ($filename === '') {
+                continue;
+            }
+            $this->altmap[$filename] = (string) ($row['alttext'] ?? '');
+        }
+        return $this->altmap;
+    }
+
+    /**
+     * Optimize one keyset page of the job's stored replacement images: cap the
+     * longest edge at the job's optimizemaxpx and re-encode JPEG/WebP at the
+     * job's optimizequality. Each stored file is rewritten in place (same
+     * location, same name) so filename matching is unaffected.
+     *
+     * The cursor is the pathnamehash of the last file processed: rewriting a
+     * file gives it a new id but the same pathnamehash, so id-based paging
+     * would revisit rewritten files while hash-based paging cannot.
+     *
+     * @param string $afterhash Cursor pathnamehash ('' to start).
+     * @param int $limit Maximum files to examine this page.
+     * @return array ['lasthash' => string, 'processed' => int, 'exhausted' => bool]
+     */
+    public function optimize_page(string $afterhash, int $limit): array {
+        global $DB;
+
+        $maxpx = (int) $this->job->optimizemaxpx;
+        $quality = min(100, max(1, (int) $this->job->optimizequality));
+
+        $rows = $DB->get_records_select(
+            'files',
+            "contextid = :ctx AND component = :comp AND filearea = 'replacement'
+                AND itemid = :jobid AND filename <> '.' AND pathnamehash > :cursor",
+            [
+                'ctx'    => $this->context->id,
+                'comp'   => manager::COMPONENT,
+                'jobid'  => (int) $this->job->id,
+                'cursor' => $afterhash,
+            ],
+            'pathnamehash ASC',
+            'id, pathnamehash',
+            0,
+            $limit
+        );
+
+        $processed = 0;
+        $lasthash = $afterhash;
+        foreach ($rows as $row) {
+            $lasthash = $row->pathnamehash;
+            $processed++;
+            $stored = $this->fs->get_file_by_id((int) $row->id);
+            if (!$stored || $stored->is_directory()) {
+                continue;
+            }
+            try {
+                $this->optimize_one($stored, $maxpx, $quality);
+            } catch (\Throwable $e) {
+                // A corrupt or unsupported image is left as uploaded rather
+                // than failing the job; the apply will use it unoptimized.
+                mtrace('tool_imageextractor: could not optimize replacement "'
+                    . $stored->get_filename() . '": ' . $e->getMessage());
+            }
+        }
+
+        return [
+            'lasthash'  => $lasthash,
+            'processed' => $processed,
+            'exhausted' => count($rows) < $limit,
+        ];
+    }
+
+    /**
+     * Optimize a single stored replacement image in place, when worthwhile.
+     *
+     * GIFs are skipped (re-encoding drops animation frames) and so is any
+     * content GD cannot decode (SVG and friends). The rewritten file is only
+     * kept when it is actually smaller or was resized; a re-encode that grows
+     * the file is discarded.
+     *
+     * @param \stored_file $stored
+     * @param int $maxpx Longest-edge cap in pixels.
+     * @param int $quality JPEG/WebP quality (1-100).
+     * @return bool Whether the file was rewritten.
+     */
+    protected function optimize_one(\stored_file $stored, int $maxpx, int $quality): bool {
+        // Only formats GD re-encodes faithfully; GIF is excluded because
+        // re-encoding drops animation frames, and everything else (SVG, BMP,
+        // TIFF...) is left exactly as uploaded.
+        $mimetype = (string) $stored->get_mimetype();
+        $supported = ['image/jpeg', 'image/png', 'image/webp'];
+        if (!in_array($mimetype, $supported, true)) {
+            return false;
+        }
+        if ($mimetype === 'image/webp' && !function_exists('imagewebp')) {
+            return false;
+        }
+
+        $content = $stored->get_content();
+        $image = @imagecreatefromstring($content);
+        if ($image === false) {
+            return false;
+        }
+
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $longest = max($width, $height);
+        $resized = false;
+        if ($maxpx > 0 && $longest > $maxpx) {
+            $scale = $maxpx / $longest;
+            $newwidth = max(1, (int) round($width * $scale));
+            $newheight = max(1, (int) round($height * $scale));
+            $scaled = imagescale($image, $newwidth, $newheight, IMG_BICUBIC);
+            if ($scaled !== false) {
+                imagedestroy($image);
+                $image = $scaled;
+                $resized = true;
+            }
+        }
+
+        // Re-encode in the original format so the filename and mime type stay
+        // truthful.
+        ob_start();
+        if ($mimetype === 'image/png') {
+            imagealphablending($image, false);
+            imagesavealpha($image, true);
+            imagepng($image, null, 9);
+        } else if ($mimetype === 'image/webp') {
+            imagealphablending($image, false);
+            imagesavealpha($image, true);
+            imagewebp($image, null, $quality);
+        } else {
+            imagejpeg($image, null, $quality);
+        }
+        $newcontent = ob_get_clean();
+        imagedestroy($image);
+
+        if ($newcontent === false || $newcontent === '') {
+            return false;
+        }
+        // Keep the rewrite only when it helps: it was resized, or the
+        // re-encode alone made it smaller.
+        if (!$resized && strlen($newcontent) >= strlen($content)) {
+            return false;
+        }
+
+        $filerecord = [
+            'contextid' => $stored->get_contextid(),
+            'component' => $stored->get_component(),
+            'filearea'  => $stored->get_filearea(),
+            'itemid'    => $stored->get_itemid(),
+            'filepath'  => $stored->get_filepath(),
+            'filename'  => $stored->get_filename(),
+            'mimetype'  => $mimetype,
+            'author'    => $stored->get_author(),
+            'license'   => $stored->get_license(),
+        ];
+        $stored->delete();
+        $this->fs->create_file_from_string($filerecord, $newcontent);
+        return true;
+    }
+
+    /**
+     * How many files are stored in this job's replacement area (the
+     * denominator for the optimization progress bar).
+     *
+     * @return int
+     */
+    public function count_replacements(): int {
+        global $DB;
+        return $DB->count_records_select(
+            'files',
+            "contextid = :ctx AND component = :comp AND filearea = 'replacement'
+                AND itemid = :jobid AND filename <> '.'",
+            [
+                'ctx'   => $this->context->id,
+                'comp'  => manager::COMPONENT,
+                'jobid' => (int) $this->job->id,
+            ]
+        );
+    }
+
+    /**
      * Restore up to $limit replaced targets from their backups.
      *
      * @param int $limit
@@ -380,7 +807,9 @@ class replacer {
                 continue;
             }
             try {
-                $this->write_to_location($item, $backup);
+                // Restore carries the backup's own metadata back to the
+                // location, not the replacement's that currently sits there.
+                $this->write_to_location($item, $backup, true);
                 $this->fs->delete_area_files($this->context->id, manager::COMPONENT, 'backup', (int) $item->id);
                 $DB->update_record('tool_imageextractor_item', (object) [
                     'id'            => $item->id,
@@ -438,11 +867,28 @@ class replacer {
      * Write a source file's content into a target item's location, replacing
      * whatever is there.
      *
+     * The metadata (author, license, uploader, creation time) written onto the
+     * new file depends on which direction we are going:
+     *
+     * - A content replace preserves the TARGET's own metadata: it describes the
+     *   file at its location, not the uploaded replacement, so credit lines and
+     *   date-based criteria keep working after the swap.
+     * - A restore puts back the BACKUP's metadata, because the backup is a
+     *   faithful copy of the original captured at replace time. Preserving the
+     *   live (replaced) file's metadata would instead strand the replacement's
+     *   author/license on the restored original - visibly wrong for a job that
+     *   was replaced before content-preservation existed.
+     *
+     * When the chosen source of metadata is absent, fall back to what the
+     * analysis recorded on the item row.
+     *
      * @param \stdClass $item
-     * @param \stored_file $source
+     * @param \stored_file $source The file whose content is written.
+     * @param bool $metadatafromsource Take metadata from $source (restore)
+     *                                 rather than the existing target (replace).
      * @return void
      */
-    protected function write_to_location(\stdClass $item, \stored_file $source) {
+    protected function write_to_location(\stdClass $item, \stored_file $source, bool $metadatafromsource = false) {
         $existing = $this->fs->get_file(
             $item->contextid,
             $item->component,
@@ -451,17 +897,25 @@ class replacer {
             $item->filepath,
             $item->filename
         );
+
+        $meta = $metadatafromsource ? $source : $existing;
+        $filerecord = [
+            'contextid'   => (int) $item->contextid,
+            'component'   => $item->component,
+            'filearea'    => $item->filearea,
+            'itemid'      => (int) $item->fileitemid,
+            'filepath'    => $item->filepath,
+            'filename'    => $item->filename,
+            'author'      => $meta ? $meta->get_author() : ($item->author ?? null),
+            'license'     => $meta ? $meta->get_license() : ($item->license ?? null),
+            'userid'      => $meta ? $meta->get_userid() : ((int) $item->uploaderid ?: null),
+            'timecreated' => $meta ? $meta->get_timecreated() : (int) $item->filetimecreated,
+        ];
+
         if ($existing) {
             $existing->delete();
         }
-        $this->fs->create_file_from_storedfile([
-            'contextid' => (int) $item->contextid,
-            'component' => $item->component,
-            'filearea'  => $item->filearea,
-            'itemid'    => (int) $item->fileitemid,
-            'filepath'  => $item->filepath,
-            'filename'  => $item->filename,
-        ], $source);
+        $this->fs->create_file_from_storedfile($filerecord, $source);
     }
 
     /**

@@ -22,6 +22,11 @@
 namespace tool_imageextractor\task;
 
 use tool_imageextractor\manager;
+use tool_imageextractor\replace_job_maker;
+
+defined('MOODLE_INTERNAL') || die();
+
+require_once(__DIR__ . '/../fixtures/replace_job_maker.php');
 
 /**
  * Tests for the two-phase replace task flow (analyse, review, apply).
@@ -30,6 +35,8 @@ use tool_imageextractor\manager;
  * @covers \tool_imageextractor\manager
  */
 final class process_replace_test extends \advanced_testcase {
+    use replace_job_maker;
+
     /**
      * Enable the plugin and the replace feature.
      *
@@ -89,41 +96,10 @@ final class process_replace_test extends \advanced_testcase {
      * @return \stdClass The job record.
      */
     protected function make_replace_job(string $replacementcontent): \stdClass {
-        global $DB, $USER;
-
-        $now = time();
-        $job = (object) [
-            'name'         => 'Async replace',
-            'jobtype'      => 'replace',
-            'status'       => manager::STATUS_DRAFT,
-            'criteria'     => json_encode([
-                'imageonly' => true,
-                'component' => 'mod_label',
-                'filearea'  => 'intro',
-            ]),
-            'csvmode'      => 'none',
-            'namingrule'   => '{originalname}',
-            'replacemode'  => 'single',
-            'backup'       => 1,
-            'missingonly'  => 0,
-            'dedupe'       => 0,
-            'volumesize'   => 1048576,
-            'usermodified' => $USER->id,
-            'timecreated'  => $now,
-            'timemodified' => $now,
-        ];
-        $job->id = $DB->insert_record('tool_imageextractor_job', $job);
-
-        get_file_storage()->create_file_from_string([
-            'contextid' => \context_system::instance()->id,
-            'component' => manager::COMPONENT,
-            'filearea'  => 'replacement',
-            'itemid'    => $job->id,
-            'filepath'  => '/',
-            'filename'  => 'new.png',
-        ], $replacementcontent);
-
-        return $DB->get_record('tool_imageextractor_job', ['id' => $job->id]);
+        return $this->make_replace_job_record(
+            ['name' => 'Async replace', 'status' => manager::STATUS_DRAFT],
+            $replacementcontent
+        );
     }
 
     /**
@@ -375,5 +351,52 @@ final class process_replace_test extends \advanced_testcase {
         $this->assertSame(3, (int) $job->totalmatched);
         $this->assertNull($job->progressstage);
         $this->assertSame(0, (int) $job->progresstotal);
+    }
+
+    /**
+     * The metadata-only mode runs through the full analyse -> review -> apply
+     * flow: the matched files get the new author/licence, their content is
+     * untouched, and nothing is backed up.
+     */
+    public function test_metadata_only_flow(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->expectOutputRegex('/tool_imageextractor:/');
+        $this->enable_plugin();
+
+        $target = $this->make_target('CONTENT');
+        $job = $this->make_replace_job('IGNORED');
+        $DB->set_field('tool_imageextractor_job', 'replacemode', 'metadata', ['id' => $job->id]);
+        $DB->set_field('tool_imageextractor_job', 'metaauthor', 'New Author', ['id' => $job->id]);
+        $DB->set_field('tool_imageextractor_job', 'metalicense', 'public', ['id' => $job->id]);
+        $DB->set_field('tool_imageextractor_job', 'backup', 0, ['id' => $job->id]);
+
+        manager::queue_analyse($job->id);
+        $this->drain_tasks();
+        $this->assertSame(manager::STATUS_REVIEW, manager::get_job($job->id)->status);
+
+        manager::queue_job($job->id);
+        $this->drain_tasks();
+
+        $job = manager::get_job($job->id);
+        $this->assertSame(manager::STATUS_COMPLETED, $job->status);
+        $this->assertSame('CONTENT', $this->content_at($target));
+
+        $file = get_file_storage()->get_file(
+            $target['contextid'],
+            $target['component'],
+            $target['filearea'],
+            $target['itemid'],
+            $target['filepath'],
+            $target['filename']
+        );
+        $this->assertSame('New Author', $file->get_author());
+        $this->assertSame('public', $file->get_license());
+
+        $item = $DB->get_record('tool_imageextractor_item', ['jobid' => $job->id]);
+        $this->assertSame('done', $item->status);
+        // Metadata jobs never hold restorable backups, so re-running is not
+        // blocked by the stranded-backup guard.
+        $this->assertFalse(manager::has_restorable($job->id));
     }
 }

@@ -64,5 +64,53 @@ function xmldb_tool_imageextractor_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026071400, 'tool', 'imageextractor');
     }
 
+    if ($oldversion < 2026071500) {
+        // Replace-job options for replacement optimization (longest-edge cap +
+        // re-encode quality) and the metadata-only replace mode (new author /
+        // license without touching content).
+        $table = new xmldb_table('tool_imageextractor_job');
+        $fields = [
+            new xmldb_field('optimizemaxpx', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'missingonly'),
+            new xmldb_field('optimizequality', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '85', 'optimizemaxpx'),
+            new xmldb_field('metaauthor', XMLDB_TYPE_CHAR, '255', null, null, null, null, 'optimizequality'),
+            new xmldb_field('metalicense', XMLDB_TYPE_CHAR, '255', null, null, null, null, 'metaauthor'),
+        ];
+        foreach ($fields as $field) {
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+
+        // Per-item image metadata for the export manifest and sidecars: the
+        // file's recorded author and license (captured at match time) and its
+        // pixel dimensions (resolved when packed).
+        $table = new xmldb_table('tool_imageextractor_item');
+        $fields = [
+            new xmldb_field('author', XMLDB_TYPE_CHAR, '255', null, null, null, null, 'uploaderid'),
+            new xmldb_field('license', XMLDB_TYPE_CHAR, '255', null, null, null, null, 'author'),
+            new xmldb_field('imagewidth', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'license'),
+            new xmldb_field('imageheight', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'imagewidth'),
+        ];
+        foreach ($fields as $field) {
+            if (!$dbman->field_exists($table, $field)) {
+                $dbman->add_field($table, $field);
+            }
+        }
+
+        upgrade_plugin_savepoint(true, 2026071500, 'tool', 'imageextractor');
+    }
+
+    if ($oldversion < 2026071501) {
+        // Per-item alt text (the image's description, read from the HTML that
+        // embeds it) for the export manifest and the alt-text audit.
+        $table = new xmldb_table('tool_imageextractor_item');
+        $field = new xmldb_field('alttext', XMLDB_TYPE_TEXT, null, null, null, null, null, 'imageheight');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026071501, 'tool', 'imageextractor');
+    }
+
     return true;
 }

@@ -6,6 +6,73 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.16.0-beta] — 2026-07-15
+
+Build `2026071501`.
+
+### Added
+- **Image descriptions (alt text) in the export.** The manifest CSV and the
+  JSON sidecars now carry each image's description, read from the alt attribute
+  of the `<img>` tag in the course content that embeds it (page and module
+  content/intro, book chapters, lesson pages, forum posts, glossary entries,
+  question text, course/section summaries). Images with no description show
+  blank — so the manifest doubles as an accessibility audit of undescribed
+  images. Stored on a new `alttext` item field.
+- **Alt-text replace mode.** A fourth replace mode rewrites image descriptions
+  in the course content that embeds them, from an uploaded `filename,alttext`
+  CSV — the exported manifest edited in place drops straight back in. Only the
+  matched `<img>` tags' alt attributes are touched (the rest of the markup is
+  left byte-for-byte unchanged); image content is never altered. Admin-only
+  with a confirmation and a preview of current-vs-new descriptions; the
+  previous description is recorded per item. A new `htmllocator` class maps a
+  file back to its embedding HTML field and reads/writes the alt text.
+
+### Fixed
+- **Restore now puts back the backup's own metadata** (author, licence,
+  uploader, creation time) rather than leaving the replacement's metadata on
+  the restored original — visible on jobs replaced before content-preservation
+  existed. (Codex review.)
+- **The captured author name is cleared on erasure.** It is exported in a user
+  data request and anonymised together with the uploader attribution in the
+  per-user, multi-user and context-wide privacy deletions. (Codex review.)
+
+## [0.15.0-beta] — 2026-07-15
+
+Build `2026071500`.
+
+### Added
+- **Replacement image optimization.** The Replace panel can now resize and
+  re-encode uploaded replacements before they are applied: a longest-edge
+  pixel cap (default 1920) plus a JPEG/WebP quality (default 85). The
+  optimization runs as its own paced background phase (with live progress)
+  before anything is written, each uploaded file is rewritten in place exactly
+  once, GIF/SVG are never altered, and a re-encode is only kept when it makes
+  the file smaller.
+- **Chunked replacement uploads.** The replacement ZIP picker is now a
+  filemanager accepting up to 50 archives, so a replacement set larger than
+  the site's upload limit can be uploaded as several smaller ZIP chunks (e.g.
+  re-uploading the extract's volumes one by one after watermarking). All
+  chunks unpack into one pool and are matched to targets by filename.
+- **Activity (module) search criteria.** Jobs can now scope files to an
+  activity type (Lesson, Page, ...) and an instance-name pattern such as
+  "Lesson 1*", matching files stored in those activities' contexts. The type
+  is validated against installed modules before ever touching SQL.
+- **Per-module and image metadata in the export.** The manifest CSV and the
+  per-image JSON sidecars now carry the activity the file came from (`cmid`,
+  `module`, `modulename`) plus the file's `author`, `license`, `imagewidth`
+  and `imageheight`. Author/licence are captured at match time; dimensions are
+  resolved as each file is packed.
+- **Metadata-only replace mode.** A third replace mode updates the author
+  and/or licence of every matched file without touching image content - no
+  upload, no backups needed, old values recorded per item, with its own
+  confirmation screen and preview of current values.
+
+### Changed
+- **Content replaces now preserve the target's metadata.** Replacing a file's
+  content keeps the original author, licence, uploader and creation time on
+  the new file instead of adopting the uploaded replacement's, so credit
+  lines and date-based criteria keep working after a replace.
+
 ## [0.14.0-beta] — 2026-07-14
 
 Build `2026071400`.

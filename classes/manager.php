@@ -115,17 +115,19 @@ class manager {
      */
     public static function default_criteria(): array {
         return [
-            'imageonly'       => true,
-            'component'       => '',
-            'filearea'        => '',
-            'filenamepattern' => '',
-            'mimetypes'       => [],
-            'courseids'       => [],
-            'categoryids'     => [],
-            'minsize'         => 0,
-            'maxsize'         => 0,
-            'datefrom'        => 0,
-            'dateto'          => 0,
+            'imageonly'          => true,
+            'component'          => '',
+            'filearea'           => '',
+            'filenamepattern'    => '',
+            'mimetypes'          => [],
+            'courseids'          => [],
+            'categoryids'        => [],
+            'modname'            => '',
+            'modinstancepattern' => '',
+            'minsize'            => 0,
+            'maxsize'            => 0,
+            'datefrom'           => 0,
+            'dateto'             => 0,
         ];
     }
 
@@ -156,6 +158,15 @@ class manager {
         $criteria['courseids'] = self::clean_ids($data->courseids ?? null);
         $criteria['categoryids'] = self::clean_ids($data->categoryids ?? null);
 
+        // Activity scope: the type is validated against installed modules (it
+        // becomes a table join in the matcher); the instance-name pattern only
+        // means anything with a type to join.
+        $modname = trim((string) ($data->modname ?? ''));
+        if ($modname !== '' && array_key_exists($modname, \core_component::get_plugin_list('mod'))) {
+            $criteria['modname'] = $modname;
+            $criteria['modinstancepattern'] = trim((string) ($data->modinstancepattern ?? ''));
+        }
+
         return $criteria;
     }
 
@@ -171,6 +182,42 @@ class manager {
             return [];
         }
         return array_values(array_unique(array_filter(array_map('intval', $raw), fn($id) => $id > 0)));
+    }
+
+    /**
+     * Build a pending item row from a matched file row, populating the fields
+     * that are common to both the extract match (task\process_job) and the
+     * replace match (replacer): the file's identity, location and captured
+     * metadata. The caller fills in the parts that differ - the resolved course
+     * and the output/replacement naming.
+     *
+     * @param int $jobid
+     * @param \stdClass $file A matched {files} row from the matcher.
+     * @return \stdClass A partial tool_imageextractor_item record.
+     */
+    public static function item_from_file(int $jobid, \stdClass $file): \stdClass {
+        $item = new \stdClass();
+        $item->jobid = $jobid;
+        $item->fileid = (int) $file->id;
+        $item->contenthash = $file->contenthash;
+        $item->filename = $file->filename;
+        $item->filesize = (int) $file->filesize;
+        $item->mimetype = $file->mimetype;
+        $item->contextid = (int) $file->contextid;
+        $item->component = $file->component;
+        $item->filearea = $file->filearea;
+        $item->filepath = $file->filepath;
+        $item->fileitemid = (int) $file->itemid;
+        $item->uploaderid = (int) $file->userid;
+        $item->author = $file->author ?? null;
+        $item->license = $file->license ?? null;
+        $item->imagewidth = 0;
+        $item->imageheight = 0;
+        $item->filetimecreated = (int) $file->timecreated;
+        $item->volume = 0;
+        $item->status = 'pending';
+        $item->timeprocessed = 0;
+        return $item;
     }
 
     /**
@@ -363,13 +410,59 @@ class manager {
     public static function set_replace_action(int $jobid, \stdClass $data): void {
         global $DB, $USER;
 
+        $mode = (string) ($data->replacemode ?? 'single');
+        if (!in_array($mode, ['single', 'zip', 'metadata', 'alttext'], true)) {
+            $mode = 'single';
+        }
+
         $record = new \stdClass();
         $record->id = $jobid;
         $record->jobtype = 'replace';
-        $record->replacemode = ($data->replacemode ?? 'single') === 'zip' ? 'zip' : 'single';
-        $record->backup = !empty($data->backup) ? 1 : 0;
+        $record->replacemode = $mode;
         $record->usermodified = $USER->id;
         $record->timemodified = time();
+
+        if ($mode === 'metadata') {
+            // Metadata-only: record the new author/license; content is never
+            // touched, so there is nothing to back up and no source to store
+            // or optimize.
+            $record->backup = 0;
+            $record->metaauthor = trim((string) ($data->metaauthor ?? ''));
+            $record->metalicense = trim((string) ($data->metalicense ?? ''));
+            $record->optimizemaxpx = 0;
+            $DB->update_record('tool_imageextractor_job', $record);
+            return;
+        }
+
+        if ($mode === 'alttext') {
+            // Alt-text: only the description CSV is stored; no image source, no
+            // backup (the old alt text is recorded per item at apply time) and
+            // no optimization.
+            $record->backup = 0;
+            $record->metaauthor = null;
+            $record->metalicense = null;
+            $record->optimizemaxpx = 0;
+            $DB->update_record('tool_imageextractor_job', $record);
+            if (isset($data->altcsvfile)) {
+                file_save_draft_area_files(
+                    (int) $data->altcsvfile,
+                    self::context()->id,
+                    self::COMPONENT,
+                    'altcsv',
+                    $jobid,
+                    ['subdirs' => 0, 'maxfiles' => 1]
+                );
+            }
+            return;
+        }
+
+        $record->backup = !empty($data->backup) ? 1 : 0;
+        $record->metaauthor = null;
+        $record->metalicense = null;
+        // Optimization: a longest-edge cap of 0 means off. The quality only
+        // applies while optimization is on, and is clamped to a sane range.
+        $record->optimizemaxpx = !empty($data->optimize) ? max(0, (int) ($data->optimizemaxpx ?? 0)) : 0;
+        $record->optimizequality = min(100, max(1, (int) ($data->optimizequality ?? 85)));
         $DB->update_record('tool_imageextractor_job', $record);
 
         self::store_replacement_files($data, $jobid);
@@ -429,28 +522,41 @@ class manager {
             if (empty($data->replacementzip)) {
                 return;
             }
-            // Read the uploaded ZIP from the draft area and unpack its entries
-            // into the replacement area so they can be matched by filename.
+            // Read the uploaded ZIPs from the draft area and unpack their
+            // entries into the replacement area so they can be matched by
+            // filename. The picker accepts several archives so a replacement
+            // set larger than the site's upload limit can be supplied as
+            // multiple smaller ZIP chunks (e.g. one per extracted volume);
+            // every chunk's entries land in the same flat matching pool.
             $usercontext = \context_user::instance($USER->id);
             $draftfiles = $fs->get_area_files(
                 $usercontext->id,
                 'user',
                 'draft',
                 (int) $data->replacementzip,
-                'id',
+                'filename',
                 false
             );
-            $zip = null;
-            foreach ($draftfiles as $file) {
-                $zip = $file;
-                break;
-            }
-            if (!$zip) {
+            if (!$draftfiles) {
                 return;
             }
             $fs->delete_area_files($context->id, self::COMPONENT, 'replacement', $jobid);
             $packer = get_file_packer('application/zip');
-            $packer->extract_to_storage($zip, $context->id, self::COMPONENT, 'replacement', $jobid, '/');
+            $chunk = 0;
+            foreach ($draftfiles as $zip) {
+                // Each chunk unpacks into its own folder so two chunks holding
+                // the same entry path can never collide; replacement matching
+                // is by basename and ignores folders, so the split is invisible.
+                $chunk++;
+                $packer->extract_to_storage(
+                    $zip,
+                    $context->id,
+                    self::COMPONENT,
+                    'replacement',
+                    $jobid,
+                    '/chunk' . $chunk . '/'
+                );
+            }
             return;
         }
 
@@ -719,7 +825,8 @@ class manager {
             'tool_imageextractor_item',
             ['jobid' => $jobid],
             '',
-            'id, contextid, component, filearea, fileitemid, filepath, filename, mimetype, filesize, replacementname',
+            'id, contextid, component, filearea, fileitemid, filepath, filename, mimetype, filesize, replacementname, '
+                . 'author, license',
             0,
             $samplelimit
         ));
@@ -955,6 +1062,7 @@ class manager {
         self::clear_outputs($jobid);
         $fs->delete_area_files($context->id, self::COMPONENT, 'csv', $jobid);
         $fs->delete_area_files($context->id, self::COMPONENT, 'replacement', $jobid);
+        $fs->delete_area_files($context->id, self::COMPONENT, 'altcsv', $jobid);
 
         if ($DB->record_exists('tool_imageextractor_item', ['jobid' => $jobid])) {
             $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_CLEARING, ['id' => $jobid]);

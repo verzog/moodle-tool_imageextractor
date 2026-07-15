@@ -97,6 +97,30 @@ class criteria_fields {
         $mform->setType('filenamepattern', PARAM_TEXT);
         $mform->addHelpButton('filenamepattern', 'filenamepattern', 'tool_imageextractor');
 
+        // Activity scope: limit to files stored in activities of one type,
+        // optionally narrowed to instances whose name matches a pattern
+        // ("Lesson 1*"). The name filter needs the type (each module keeps its
+        // instance names in its own table), so it stays disabled until a type
+        // is chosen.
+        $mform->addElement(
+            'select',
+            'modname',
+            get_string('modtype', 'tool_imageextractor'),
+            self::module_options()
+        );
+        $mform->setDefault('modname', '');
+        $mform->addHelpButton('modname', 'modtype', 'tool_imageextractor');
+
+        $mform->addElement(
+            'text',
+            'modinstancepattern',
+            get_string('modinstancepattern', 'tool_imageextractor'),
+            ['size' => 40, 'placeholder' => 'Lesson 1*']
+        );
+        $mform->setType('modinstancepattern', PARAM_TEXT);
+        $mform->addHelpButton('modinstancepattern', 'modinstancepattern', 'tool_imageextractor');
+        $mform->hideIf('modinstancepattern', 'modname', 'eq', '');
+
         $mform->addElement(
             'text',
             'minsizekb',
@@ -132,8 +156,8 @@ class criteria_fields {
         // nominated file.
         $matchhidden = [
             'imageonly', 'courseids', 'categoryids', 'mimetypes', 'component',
-            'filearea', 'filenamepattern', 'minsizekb', 'maxsizekb',
-            'datefrom', 'dateto',
+            'filearea', 'filenamepattern', 'modname', 'modinstancepattern',
+            'minsizekb', 'maxsizekb', 'datefrom', 'dateto',
         ];
         foreach ($matchhidden as $element) {
             $mform->hideIf($element, 'csvmode', 'eq', 'match');
@@ -167,6 +191,23 @@ class criteria_fields {
     }
 
     /**
+     * The installed activity types, for the activity-scope select.
+     *
+     * @return array modname => display name, with '' => any first.
+     */
+    public static function module_options(): array {
+        global $DB;
+        $options = ['' => get_string('modtype_any', 'tool_imageextractor')];
+        foreach ($DB->get_records('modules', [], 'name', 'id, name') as $module) {
+            $options[$module->name] = get_string('modulename', 'mod_' . $module->name);
+        }
+        // Present alphabetically by display name, keeping "any" first.
+        $any = array_shift($options);
+        \core_collator::asort($options);
+        return ['' => $any] + $options;
+    }
+
+    /**
      * Map a job's stored criteria back to form-field defaults.
      *
      * @param array $criteria
@@ -183,6 +224,8 @@ class criteria_fields {
             'component'       => $criteria['component'] ?? '',
             'filearea'        => $criteria['filearea'] ?? '',
             'filenamepattern' => $criteria['filenamepattern'] ?? '',
+            'modname'         => $criteria['modname'] ?? '',
+            'modinstancepattern' => $criteria['modinstancepattern'] ?? '',
             'minsizekb'       => !empty($criteria['minsize']) ? (int) ($criteria['minsize'] / 1024) : '',
             'maxsizekb'       => !empty($criteria['maxsize']) ? (int) ($criteria['maxsize'] / 1024) : '',
             'datefrom'        => $criteria['datefrom'] ?? 0,

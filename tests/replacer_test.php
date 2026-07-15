@@ -21,12 +21,18 @@
 
 namespace tool_imageextractor;
 
+defined('MOODLE_INTERNAL') || die();
+
+require_once(__DIR__ . '/fixtures/replace_job_maker.php');
+
 /**
  * Tests for the replace/restore engine.
  *
  * @covers \tool_imageextractor\replacer
  */
 final class replacer_test extends \advanced_testcase {
+    use replace_job_maker;
+
     /**
      * Create a replace job record and its single replacement source.
      *
@@ -35,38 +41,7 @@ final class replacer_test extends \advanced_testcase {
      * @return \stdClass The job record.
      */
     protected function make_replace_job(array $criteria, string $replacementcontent): \stdClass {
-        global $DB, $USER;
-
-        $now = time();
-        $job = (object) [
-            'name'         => 'Test replace',
-            'jobtype'      => 'replace',
-            'status'       => manager::STATUS_QUEUED,
-            'criteria'     => json_encode($criteria),
-            'csvmode'      => 'none',
-            'namingrule'   => '{originalname}',
-            'replacemode'  => 'single',
-            'backup'       => 1,
-            'missingonly'  => 0,
-            'dedupe'       => 0,
-            'volumesize'   => 1048576,
-            'usermodified' => $USER->id,
-            'timecreated'  => $now,
-            'timemodified' => $now,
-        ];
-        $job->id = $DB->insert_record('tool_imageextractor_job', $job);
-
-        // Store the single replacement image in the job's replacement area.
-        get_file_storage()->create_file_from_string([
-            'contextid' => \context_system::instance()->id,
-            'component' => manager::COMPONENT,
-            'filearea'  => 'replacement',
-            'itemid'    => $job->id,
-            'filepath'  => '/',
-            'filename'  => 'new.png',
-        ], $replacementcontent);
-
-        return $DB->get_record('tool_imageextractor_job', ['id' => $job->id]);
+        return $this->make_replace_job_record(['criteria' => json_encode($criteria)], $replacementcontent);
     }
 
     /**
@@ -305,5 +280,255 @@ final class replacer_test extends \advanced_testcase {
 
         // No broken files exist, so nothing should have been queued.
         $this->assertSame(0, $DB->count_records('tool_imageextractor_item', ['jobid' => $job->id]));
+    }
+
+    /**
+     * A metadata-only replace stamps the new author/licence on the matched
+     * file without touching its content (the file is not even recreated),
+     * and records the old values in the item note.
+     */
+    public function test_metadata_only_replace(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $target = $fs->create_file_from_string([
+            'contextid' => $context->id,
+            'component' => 'mod_label',
+            'filearea'  => 'intro',
+            'itemid'    => 0,
+            'filepath'  => '/',
+            'filename'  => 'logo.png',
+        ], 'ORIGINAL');
+        $target->set_author('Old Author');
+        $target->set_license('allrightsreserved');
+
+        $job = $this->make_replace_job(
+            ['imageonly' => true, 'component' => 'mod_label', 'filearea' => 'intro'],
+            'IGNORED'
+        );
+        $DB->set_field('tool_imageextractor_job', 'replacemode', 'metadata', ['id' => $job->id]);
+        $DB->set_field('tool_imageextractor_job', 'metaauthor', 'New Author', ['id' => $job->id]);
+        $DB->set_field('tool_imageextractor_job', 'metalicense', 'public', ['id' => $job->id]);
+        $DB->set_field('tool_imageextractor_job', 'backup', 0, ['id' => $job->id]);
+        $job = $DB->get_record('tool_imageextractor_job', ['id' => $job->id]);
+
+        $replacer = new replacer($job);
+        $replacer->prepare();
+        $remaining = $replacer->apply_batch(10);
+        $this->assertSame(0, $remaining);
+
+        $stored = $fs->get_file($context->id, 'mod_label', 'intro', 0, '/', 'logo.png');
+        // Content untouched and the file was updated in place, not recreated.
+        $this->assertSame('ORIGINAL', $stored->get_content());
+        // Same file id: the metadata update happens in place, it does not
+        // delete and recreate the file. Cast because a DB-loaded stored_file
+        // reports its id as a string on some drivers (e.g. PostgreSQL).
+        $this->assertSame((int) $target->get_id(), (int) $stored->get_id());
+        $this->assertSame('New Author', $stored->get_author());
+        $this->assertSame('public', $stored->get_license());
+
+        $item = $DB->get_record('tool_imageextractor_item', ['jobid' => $job->id]);
+        $this->assertSame('done', $item->status);
+        $this->assertStringContainsString('Old Author', $item->note);
+        $this->assertStringContainsString('allrightsreserved', $item->note);
+        // Nothing was backed up (nothing destructive happened to the content).
+        $this->assertFalse((bool) $fs->get_area_files(
+            $context->id,
+            manager::COMPONENT,
+            'backup',
+            (int) $item->id,
+            'id',
+            false
+        ));
+    }
+
+    /**
+     * Restore puts back the backup's own metadata, not the metadata that sits
+     * on the replaced live file (which matters for a job replaced before
+     * content-preservation existed - its replacement carries different values).
+     */
+    public function test_restore_uses_backup_metadata(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $location = [
+            'contextid' => $context->id,
+            'component' => 'mod_label',
+            'filearea'  => 'intro',
+            'itemid'    => 0,
+            'filepath'  => '/',
+            'filename'  => 'logo.png',
+        ];
+        $original = $fs->create_file_from_string($location, 'ORIGINAL');
+        $original->set_author('Original Author');
+        $original->set_license('cc-4.0');
+
+        $job = $this->make_replace_job(
+            ['imageonly' => true, 'component' => 'mod_label', 'filearea' => 'intro'],
+            'NEW'
+        );
+        $replacer = new replacer($job);
+        $replacer->prepare();
+        $this->assertSame(0, $replacer->apply_batch(10));
+
+        // Simulate an old-code replacement whose live file lost the original
+        // metadata (author/licence now belong to the uploaded replacement).
+        $replaced = $fs->get_file($context->id, 'mod_label', 'intro', 0, '/', 'logo.png');
+        $replaced->set_author('Replacement Author');
+        $replaced->set_license('allrightsreserved');
+
+        $this->assertSame(0, $replacer->restore_batch(10));
+
+        $restored = $fs->get_file($context->id, 'mod_label', 'intro', 0, '/', 'logo.png');
+        $this->assertSame('ORIGINAL', $restored->get_content());
+        // The backup carried the original metadata, so restore brings it back
+        // rather than leaving the replacement's behind.
+        $this->assertSame('Original Author', $restored->get_author());
+        $this->assertSame('cc-4.0', $restored->get_license());
+    }
+
+    /**
+     * Alt-text mode rewrites the description in the HTML that embeds the image,
+     * from the uploaded CSV, without touching the file content.
+     */
+    public function test_alttext_apply_updates_embedding_html(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course();
+        $page = $this->getDataGenerator()->create_module('page', [
+            'course'        => $course->id,
+            'content'       => '<p><img src="@@PLUGINFILE@@/pic.png" alt="before"></p>',
+            'contentformat' => FORMAT_HTML,
+        ]);
+        $modcontext = \context_module::instance($page->cmid);
+        get_file_storage()->create_file_from_string([
+            'contextid' => $modcontext->id,
+            'component' => 'mod_page',
+            'filearea'  => 'content',
+            'itemid'    => 0,
+            'filepath'  => '/',
+            'filename'  => 'pic.png',
+        ], 'PNGDATA');
+
+        // A replace job scoped to the page content, in alt-text mode, with a
+        // descriptions CSV mapping the file name to its new alt text.
+        $job = $this->make_replace_job_record([
+            'criteria'    => json_encode(['imageonly' => true, 'component' => 'mod_page', 'filearea' => 'content']),
+            'replacemode' => 'alttext',
+            'backup'      => 0,
+        ], 'unused');
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_system::instance()->id,
+            'component' => manager::COMPONENT,
+            'filearea'  => 'altcsv',
+            'itemid'    => $job->id,
+            'filepath'  => '/',
+            'filename'  => 'alt.csv',
+        ], "filename,alttext\npic.png,\"A helpful diagram\"\n");
+
+        $replacer = new replacer($job);
+        $replacer->prepare();
+        $this->assertSame(0, $replacer->apply_batch(10));
+
+        $item = $DB->get_record('tool_imageextractor_item', ['jobid' => $job->id]);
+        $this->assertSame('done', $item->status);
+        $this->assertStringContainsString('before', $item->note);
+
+        // The page content now carries the new description; the file bytes are
+        // untouched.
+        $content = $DB->get_field('page', 'content', ['id' => $page->id]);
+        $this->assertStringContainsString('alt="A helpful diagram"', $content);
+        $this->assertStringNotContainsString('alt="before"', $content);
+        $stored = get_file_storage()->get_file($modcontext->id, 'mod_page', 'content', 0, '/', 'pic.png');
+        $this->assertSame('PNGDATA', $stored->get_content());
+    }
+
+    /**
+     * A content replace preserves the target's own metadata (author, licence)
+     * across the swap instead of adopting the uploaded replacement's.
+     */
+    public function test_replace_preserves_target_metadata(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $target = $fs->create_file_from_string([
+            'contextid' => $context->id,
+            'component' => 'mod_label',
+            'filearea'  => 'intro',
+            'itemid'    => 0,
+            'filepath'  => '/',
+            'filename'  => 'photo.png',
+        ], 'OLD');
+        $target->set_author('Course Author');
+        $target->set_license('cc-4.0');
+
+        $job = $this->make_replace_job(
+            ['imageonly' => true, 'component' => 'mod_label', 'filearea' => 'intro'],
+            'NEW'
+        );
+        $replacer = new replacer($job);
+        $replacer->prepare();
+        $this->assertSame(0, $replacer->apply_batch(10));
+
+        $stored = $fs->get_file($context->id, 'mod_label', 'intro', 0, '/', 'photo.png');
+        $this->assertSame('NEW', $stored->get_content());
+        $this->assertSame('Course Author', $stored->get_author());
+        $this->assertSame('cc-4.0', $stored->get_license());
+    }
+
+    /**
+     * Optimizing replacements caps the longest edge in place (same location,
+     * same name, same mime type), so filename matching is unaffected.
+     */
+    public function test_optimize_replacements(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $job = $this->make_replace_job(
+            ['imageonly' => true, 'component' => 'mod_label', 'filearea' => 'intro'],
+            'placeholder'
+        );
+
+        // Swap the placeholder replacement for a real 400x200 PNG.
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $fs->delete_area_files($context->id, manager::COMPONENT, 'replacement', $job->id);
+        $image = imagecreatetruecolor(400, 200);
+        ob_start();
+        imagepng($image);
+        $png = ob_get_clean();
+        imagedestroy($image);
+        $fs->create_file_from_string([
+            'contextid' => $context->id,
+            'component' => manager::COMPONENT,
+            'filearea'  => 'replacement',
+            'itemid'    => $job->id,
+            'filepath'  => '/',
+            'filename'  => 'big.png',
+        ], $png);
+
+        $DB->set_field('tool_imageextractor_job', 'optimizemaxpx', 100, ['id' => $job->id]);
+        $DB->set_field('tool_imageextractor_job', 'optimizequality', 80, ['id' => $job->id]);
+        $job = $DB->get_record('tool_imageextractor_job', ['id' => $job->id]);
+
+        $replacer = new replacer($job);
+        $this->assertSame(1, $replacer->count_replacements());
+        $result = $replacer->optimize_page('', 10);
+        $this->assertTrue($result['exhausted']);
+        $this->assertSame(1, $result['processed']);
+
+        $optimized = $fs->get_file($context->id, manager::COMPONENT, 'replacement', $job->id, '/', 'big.png');
+        $this->assertNotFalse($optimized);
+        $this->assertSame('image/png', $optimized->get_mimetype());
+        $info = $optimized->get_imageinfo();
+        $this->assertSame(100, (int) $info['width']);
+        $this->assertSame(50, (int) $info['height']);
     }
 }

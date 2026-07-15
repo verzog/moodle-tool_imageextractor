@@ -171,11 +171,20 @@ if ($action !== '' && confirm_sesskey()) {
             \core\notification::error(get_string('errorcsvcriteriareplace', 'tool_imageextractor'));
             redirect($viewurl);
         }
+        // Only single/zip modes rewrite live image content; metadata and
+        // alt-text modes leave the files intact, so each gets a gentler
+        // warning and its own confirmation wording.
+        $warnings = [
+            'metadata' => ['metadatawarning', 'confirmmetadatafinal', 'warning'],
+            'alttext'  => ['altwarning', 'confirmaltfinal', 'warning'],
+        ];
+        [$warnkey, $confirmkey, $notiftype] = $warnings[$job->replacemode]
+            ?? ['replacewarning', 'confirmreplacefinal', 'error'];
         echo $OUTPUT->header();
-        echo $OUTPUT->notification(get_string('replacewarning', 'tool_imageextractor'), 'error');
+        echo $OUTPUT->notification(get_string($warnkey, 'tool_imageextractor'), $notiftype);
         tool_imageextractor_render_replace_preview($job, $viewurl);
         echo $OUTPUT->confirm(
-            get_string('confirmreplacefinal', 'tool_imageextractor', (int) $job->totalmatched),
+            get_string($confirmkey, 'tool_imageextractor', (int) $job->totalmatched),
             new moodle_url($viewurl, ['action' => 'replacerun', 'confirm' => 1, 'sesskey' => sesskey()]),
             $viewurl
         );
@@ -288,8 +297,28 @@ if ($job->description !== '') {
 if ($isreplace) {
     $summary->data[] = [get_string('replacemode', 'tool_imageextractor'),
         get_string('replacemode_' . $job->replacemode, 'tool_imageextractor')];
-    $summary->data[] = [get_string('backup', 'tool_imageextractor'),
-        $job->backup ? get_string('yes') : get_string('no')];
+    if ($job->replacemode === 'metadata') {
+        // Metadata-only: show what will be stamped; content backups do not
+        // apply because no content is touched.
+        if ((string) $job->metaauthor !== '') {
+            $summary->data[] = [get_string('metaauthor', 'tool_imageextractor'), s($job->metaauthor)];
+        }
+        if ((string) $job->metalicense !== '') {
+            $summary->data[] = [get_string('metalicense', 'tool_imageextractor'), s($job->metalicense)];
+        }
+    } else if ($job->replacemode !== 'alttext') {
+        // Content replace (single/zip): show backup and any optimization.
+        // Alt-text mode touches neither content nor files, so it shows nothing.
+        $summary->data[] = [get_string('backup', 'tool_imageextractor'),
+            $job->backup ? get_string('yes') : get_string('no')];
+        if ((int) $job->optimizemaxpx > 0) {
+            $summary->data[] = [get_string('optimize', 'tool_imageextractor'),
+                get_string('optimizesummary', 'tool_imageextractor', (object) [
+                    'px'      => (int) $job->optimizemaxpx,
+                    'quality' => (int) $job->optimizequality,
+                ])];
+        }
+    }
 }
 $summary->data[] = [get_string('missingonly', 'tool_imageextractor'),
     $job->missingonly ? get_string('yes') : get_string('no')];

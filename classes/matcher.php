@@ -224,6 +224,38 @@ class matcher {
             $clauses[] = '(' . implode(' OR ', $matchors) . ')';
         }
 
+        // Activity scope: limit to files stored in the context of a given
+        // activity (module) type, optionally further narrowed to instances
+        // whose name matches a pattern ("Lesson 1*"). The instance name lives
+        // in each module's own table, so the name filter requires the type to
+        // know which table to join. The type is validated against the
+        // installed modules before being interpolated as a table name.
+        $modname = trim((string) ($c['modname'] ?? ''));
+        if ($modname !== '' && array_key_exists($modname, \core_component::get_plugin_list('mod'))) {
+            $instjoin = '';
+            $instpattern = trim((string) ($c['modinstancepattern'] ?? ''));
+            if ($instpattern !== '') {
+                // Escape the value so real % or _ are literal, then turn the
+                // user-supplied '*' into the SQL wildcard.
+                $pattern = str_replace('*', '%', $DB->sql_like_escape($instpattern));
+                $p = $this->param($prefix . 'instname');
+                $instjoin = 'JOIN {' . $modname . '} inst ON inst.id = cm.instance AND '
+                    . $DB->sql_like('inst.name', ':' . $p, false);
+                $params[$p] = $pattern;
+            }
+            $pm = $this->param($prefix . 'modn');
+            $clauses[] = "EXISTS (
+                SELECT 1
+                  FROM {context} mc
+                  JOIN {course_modules} cm ON cm.id = mc.instanceid
+                  JOIN {modules} md ON md.id = cm.module AND md.name = :$pm
+                  $instjoin
+                 WHERE mc.contextlevel = " . CONTEXT_MODULE . '
+                   AND mc.id = f.contextid
+            )';
+            $params[$pm] = $modname;
+        }
+
         // Location scope: files may be limited to given courses and/or course
         // categories (from the form, or a CSV scope list of course ids). A file
         // belongs to a course/category when its context is that context or any

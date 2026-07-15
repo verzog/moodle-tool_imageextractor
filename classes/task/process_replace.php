@@ -108,16 +108,22 @@ class process_replace extends \core\task\adhoc_task {
             // one bounded batch per run so a large job never pins the database.
             // Analyse then parks for review; apply then replaces. A reviewed
             // apply skips straight to applying its already-prepared targets.
+            // Uploaded replacements may be optimized (longest-edge cap +
+            // re-encode) in their own paced phase before any content is
+            // written; metadata-only jobs never touch content or sources.
+            $optimize = ($op === 'apply' && $job->replacemode !== 'metadata'
+                && (int) $job->optimizemaxpx > 0);
+
             $phase = (string) ($data->phase ?? '');
             if ($phase === '') {
                 $DB->set_field('tool_imageextractor_job', 'status', manager::STATUS_PROCESSING, ['id' => $jobid]);
                 $DB->set_field('tool_imageextractor_job', 'timestarted', time(), ['id' => $jobid]);
                 // A reviewed apply already has its targets prepared and must not
-                // re-clear or re-match - it just replaces them. Every other run
-                // starts from the clear phase.
+                // re-clear or re-match - it optimizes (when asked) and replaces
+                // them. Every other run starts from the clear phase.
                 $hasitems = $DB->record_exists('tool_imageextractor_item', ['jobid' => $jobid]);
                 $reviewedapply = ($op === 'apply' && !$clearfirst && $hasitems);
-                $phase = $reviewedapply ? 'apply' : 'clear';
+                $phase = $reviewedapply ? ($optimize ? 'optimize' : 'apply') : 'clear';
             }
 
             if ($phase === 'clear') {
@@ -178,7 +184,34 @@ class process_replace extends \core\task\adhoc_task {
                     return;
                 }
                 mtrace('tool_imageextractor: replace job ' . $jobid . ' matched ' .
-                    $matched . ' targets; applying');
+                    $matched . ' targets; ' . ($optimize ? 'optimizing replacements' : 'applying'));
+                $this->requeue(['jobid' => $jobid, 'op' => 'apply', 'phase' => $optimize ? 'optimize' : 'apply']);
+                return;
+            }
+
+            if ($phase === 'optimize') {
+                // Rewrite the uploaded replacement images (cap + re-encode) a
+                // bounded page per run, before anything is applied. Each file
+                // is visited exactly once - the cursor is the pathnamehash,
+                // which survives the in-place rewrite.
+                if ($job->progressstage !== 'optimize') {
+                    manager::set_progress($jobid, 'optimize', 0, $replacer->count_replacements());
+                }
+                $result = $replacer->optimize_page((string) ($data->optcursor ?? ''), $batch);
+                if (!$result['exhausted']) {
+                    $done = manager::bump_progress($jobid, (int) $result['processed']);
+                    mtrace('tool_imageextractor: replace job ' . $jobid . ' optimized ' .
+                        $done . ' replacement files so far');
+                    $this->requeue([
+                        'jobid'     => $jobid,
+                        'op'        => 'apply',
+                        'phase'     => 'optimize',
+                        'optcursor' => $result['lasthash'],
+                    ]);
+                    return;
+                }
+                manager::set_progress($jobid, null);
+                mtrace('tool_imageextractor: replace job ' . $jobid . ' replacements optimized; applying');
                 $this->requeue(['jobid' => $jobid, 'op' => 'apply', 'phase' => 'apply']);
                 return;
             }
