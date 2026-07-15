@@ -6,6 +6,30 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.18.0-beta] — 2026-07-15
+
+Build `2026071503`.
+
+### Added
+- **Resumable chunked uploader for large replacement files.** A single ZIP (or
+  image) bigger than the site's per-request upload limit can now be uploaded
+  from the Replace panel: the browser slices it and posts it a chunk at a time
+  to a new `upload.php` endpoint, which assembles it (in the file storage, so it
+  survives across load-balanced app servers) straight into the job's replacement
+  area — a ZIP is unpacked and matched by filename, any other file becomes the
+  single replacement. Chunks are stored by index and re-counted server-side, so
+  a retried or resumed chunk never double-counts. New `tool_imageextractor_upload`
+  table, a `chunk_size_mb` setting (default 5), the assembler in a testable
+  `chunk_uploader` class, and a plain-JS widget; abandoned uploads are purged by
+  the cleanup task after a day. (The overall file has no size limit; each chunk
+  just needs to fit under `upload_max_filesize`/`post_max_size`.)
+- **Wider alt-text / description coverage.** The HTML locator now also finds
+  images embedded in course-category descriptions, user profile descriptions,
+  question general feedback and answers, essay grader info, data records, lesson
+  answers/responses, wiki pages, and assignment online-text/feedback — so the
+  alt-text export, the "missing description" audit and the alt-text replace reach
+  those areas too.
+
 ## [0.17.0-beta] — 2026-07-15
 
 Build `2026071502`.

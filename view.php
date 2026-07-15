@@ -106,6 +106,8 @@ if ($isreview) {
             'hasstoredsource'   => $hasstoredsource,
         ]);
         $replaceform->set_data(['id' => $id]);
+        // Drive the resumable chunked-upload widget rendered inside the panel.
+        $PAGE->requires->js(new moodle_url('/admin/tool/imageextractor/js/chunkupload.js'));
     }
 }
 

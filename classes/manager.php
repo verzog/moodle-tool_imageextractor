@@ -466,7 +466,11 @@ class manager {
         $record->optimizequality = min(100, max(1, (int) ($data->optimizequality ?? 85)));
         $DB->update_record('tool_imageextractor_job', $record);
 
-        self::store_replacement_files($data, $jobid);
+        // A completed chunked upload has already assembled the source straight
+        // into the replacement area, so there is no picker upload to store.
+        if (empty($data->chunkdone)) {
+            self::store_replacement_files($data, $jobid);
+        }
     }
 
     /**
@@ -1075,6 +1079,12 @@ class manager {
         $fs->delete_area_files($context->id, self::COMPONENT, 'csv', $jobid);
         $fs->delete_area_files($context->id, self::COMPONENT, 'replacement', $jobid);
         $fs->delete_area_files($context->id, self::COMPONENT, 'altcsv', $jobid);
+
+        // Discard any in-progress chunked uploads for this job (their chunk
+        // files are keyed by upload id, so remove them via the session).
+        foreach ($DB->get_records('tool_imageextractor_upload', ['jobid' => $jobid], '', 'id') as $upload) {
+            chunk_uploader::discard((int) $upload->id);
+        }
 
         if ($DB->record_exists('tool_imageextractor_item', ['jobid' => $jobid])) {
             $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_CLEARING, ['id' => $jobid]);

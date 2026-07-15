@@ -127,5 +127,17 @@ if ($hassiteconfig) {
         PARAM_INT
     ));
 
+    // Size of each slice the browser sends when uploading a large replacement
+    // file with the resumable chunked uploader. It must be comfortably below
+    // the server's own upload_max_filesize/post_max_size so every chunk fits
+    // in one request; the overall file has no size limit.
+    $settings->add(new admin_setting_configtext(
+        'tool_imageextractor/chunk_size_mb',
+        get_string('setting_chunk_size', 'tool_imageextractor'),
+        get_string('setting_chunk_size_desc', 'tool_imageextractor'),
+        5,
+        PARAM_INT
+    ));
+
     $ADMIN->add('tool_imageextractor_category', $settings);
 }

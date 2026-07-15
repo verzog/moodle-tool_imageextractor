@@ -115,12 +115,22 @@ class htmllocator {
 
         // Areas whose file itemid is the owning row's id directly.
         static $byitemid = [
-            'mod_book:chapter'      => ['book_chapters', 'content'],
+            'mod_book:chapter'         => ['book_chapters', 'content'],
             'mod_lesson:page_contents' => ['lesson_pages', 'contents'],
-            'mod_forum:post'        => ['forum_posts', 'message'],
-            'mod_glossary:entry'    => ['glossary_entries', 'definition'],
-            'question:questiontext' => ['question', 'questiontext'],
-            'course:section'        => ['course_sections', 'summary'],
+            'mod_lesson:page_answers'  => ['lesson_answers', 'answer'],
+            'mod_lesson:page_responses' => ['lesson_answers', 'response'],
+            'mod_forum:post'           => ['forum_posts', 'message'],
+            'mod_glossary:entry'       => ['glossary_entries', 'definition'],
+            'mod_data:content'         => ['data_content', 'content'],
+            'mod_wiki:attachments'     => ['wiki_pages', 'cachedcontent'],
+            'question:questiontext'    => ['question', 'questiontext'],
+            'question:generalfeedback' => ['question', 'generalfeedback'],
+            'question:answer'          => ['question_answers', 'answer'],
+            'question:answerfeedback'  => ['question_answers', 'feedback'],
+            'qtype_essay:graderinfo'   => ['qtype_essay_options', 'graderinfo'],
+            'assignsubmission_onlinetext:submissions_onlinetext' => ['assignsubmission_onlinetext', 'onlinetext'],
+            'assignfeedback_comments:feedback' => ['assignfeedback_comments', 'commenttext'],
+            'course:section'           => ['course_sections', 'summary'],
         ];
         $key = $component . ':' . $filearea;
         if (isset($byitemid[$key])) {
@@ -130,8 +140,18 @@ class htmllocator {
 
         // Course summary: one row per course, found from the course context.
         if ($component === 'course' && $filearea === 'summary') {
-            $courseid = self::course_id_from_context($contextid);
-            return ['course', 'summary', $courseid];
+            return ['course', 'summary', self::course_id_from_context($contextid)];
+        }
+
+        // Course-category description: one row per category, from the category
+        // context.
+        if ($component === 'coursecat' && $filearea === 'description') {
+            return ['course_categories', 'description', self::instanceid_from_context($contextid, CONTEXT_COURSECAT)];
+        }
+
+        // User profile description: one row per user, from the user context.
+        if ($component === 'user' && $filearea === 'profile') {
+            return ['user', 'description', self::instanceid_from_context($contextid, CONTEXT_USER)];
         }
 
         // Module content and intro areas: one row per activity instance, found
@@ -181,8 +201,21 @@ class htmllocator {
      * @return int
      */
     protected static function course_id_from_context(int $contextid): int {
+        return self::instanceid_from_context($contextid, CONTEXT_COURSE);
+    }
+
+    /**
+     * The instance id a context points at, when it is of the expected level
+     * (e.g. the category id of a course-category context, the user id of a
+     * user context), or 0.
+     *
+     * @param int $contextid
+     * @param int $contextlevel The expected CONTEXT_* level.
+     * @return int
+     */
+    protected static function instanceid_from_context(int $contextid, int $contextlevel): int {
         $context = \context::instance_by_id($contextid, IGNORE_MISSING);
-        if (!$context || $context->contextlevel != CONTEXT_COURSE) {
+        if (!$context || $context->contextlevel != $contextlevel) {
             return 0;
         }
         return (int) $context->instanceid;

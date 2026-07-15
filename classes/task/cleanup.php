@@ -21,6 +21,7 @@
 
 namespace tool_imageextractor\task;
 
+use tool_imageextractor\chunk_uploader;
 use tool_imageextractor\manager;
 
 /**
@@ -42,6 +43,13 @@ class cleanup extends \core\task\scheduled_task {
      */
     public function execute() {
         global $DB;
+
+        // Abandoned chunked uploads (a browser that closed mid-upload) are
+        // cleared after a day so their chunk files do not accumulate.
+        $purged = chunk_uploader::purge_stale(time() - DAYSECS);
+        if ($purged > 0) {
+            mtrace('tool_imageextractor: purged ' . $purged . ' stale chunked upload(s)');
+        }
 
         $days = (int) get_config('tool_imageextractor', 'retention_days');
         if ($days <= 0) {
