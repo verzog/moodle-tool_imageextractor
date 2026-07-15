@@ -376,4 +376,51 @@ final class process_replace_test extends \advanced_testcase {
         $this->assertNull($job->progressstage);
         $this->assertSame(0, (int) $job->progresstotal);
     }
+
+    /**
+     * The metadata-only mode runs through the full analyse -> review -> apply
+     * flow: the matched files get the new author/licence, their content is
+     * untouched, and nothing is backed up.
+     */
+    public function test_metadata_only_flow(): void {
+        global $DB;
+        $this->resetAfterTest();
+        $this->expectOutputRegex('/tool_imageextractor:/');
+        $this->enable_plugin();
+
+        $target = $this->make_target('CONTENT');
+        $job = $this->make_replace_job('IGNORED');
+        $DB->set_field('tool_imageextractor_job', 'replacemode', 'metadata', ['id' => $job->id]);
+        $DB->set_field('tool_imageextractor_job', 'metaauthor', 'New Author', ['id' => $job->id]);
+        $DB->set_field('tool_imageextractor_job', 'metalicense', 'public', ['id' => $job->id]);
+        $DB->set_field('tool_imageextractor_job', 'backup', 0, ['id' => $job->id]);
+
+        manager::queue_analyse($job->id);
+        $this->drain_tasks();
+        $this->assertSame(manager::STATUS_REVIEW, manager::get_job($job->id)->status);
+
+        manager::queue_job($job->id);
+        $this->drain_tasks();
+
+        $job = manager::get_job($job->id);
+        $this->assertSame(manager::STATUS_COMPLETED, $job->status);
+        $this->assertSame('CONTENT', $this->content_at($target));
+
+        $file = get_file_storage()->get_file(
+            $target['contextid'],
+            $target['component'],
+            $target['filearea'],
+            $target['itemid'],
+            $target['filepath'],
+            $target['filename']
+        );
+        $this->assertSame('New Author', $file->get_author());
+        $this->assertSame('public', $file->get_license());
+
+        $item = $DB->get_record('tool_imageextractor_item', ['jobid' => $job->id]);
+        $this->assertSame('done', $item->status);
+        // Metadata jobs never hold restorable backups, so re-running is not
+        // blocked by the stranded-backup guard.
+        $this->assertFalse(manager::has_restorable($job->id));
+    }
 }

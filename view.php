@@ -171,11 +171,21 @@ if ($action !== '' && confirm_sesskey()) {
             \core\notification::error(get_string('errorcsvcriteriareplace', 'tool_imageextractor'));
             redirect($viewurl);
         }
+        // A metadata-only run never rewrites content, so it gets a gentler
+        // warning and its own confirmation wording.
+        $ismetadataonly = ($job->replacemode === 'metadata');
         echo $OUTPUT->header();
-        echo $OUTPUT->notification(get_string('replacewarning', 'tool_imageextractor'), 'error');
+        echo $OUTPUT->notification(
+            get_string($ismetadataonly ? 'metadatawarning' : 'replacewarning', 'tool_imageextractor'),
+            $ismetadataonly ? 'warning' : 'error'
+        );
         tool_imageextractor_render_replace_preview($job, $viewurl);
         echo $OUTPUT->confirm(
-            get_string('confirmreplacefinal', 'tool_imageextractor', (int) $job->totalmatched),
+            get_string(
+                $ismetadataonly ? 'confirmmetadatafinal' : 'confirmreplacefinal',
+                'tool_imageextractor',
+                (int) $job->totalmatched
+            ),
             new moodle_url($viewurl, ['action' => 'replacerun', 'confirm' => 1, 'sesskey' => sesskey()]),
             $viewurl
         );
@@ -288,8 +298,26 @@ if ($job->description !== '') {
 if ($isreplace) {
     $summary->data[] = [get_string('replacemode', 'tool_imageextractor'),
         get_string('replacemode_' . $job->replacemode, 'tool_imageextractor')];
-    $summary->data[] = [get_string('backup', 'tool_imageextractor'),
-        $job->backup ? get_string('yes') : get_string('no')];
+    if ($job->replacemode === 'metadata') {
+        // Metadata-only: show what will be stamped; content backups do not
+        // apply because no content is touched.
+        if ((string) $job->metaauthor !== '') {
+            $summary->data[] = [get_string('metaauthor', 'tool_imageextractor'), s($job->metaauthor)];
+        }
+        if ((string) $job->metalicense !== '') {
+            $summary->data[] = [get_string('metalicense', 'tool_imageextractor'), s($job->metalicense)];
+        }
+    } else {
+        $summary->data[] = [get_string('backup', 'tool_imageextractor'),
+            $job->backup ? get_string('yes') : get_string('no')];
+        if ((int) $job->optimizemaxpx > 0) {
+            $summary->data[] = [get_string('optimize', 'tool_imageextractor'),
+                get_string('optimizesummary', 'tool_imageextractor', (object) [
+                    'px'      => (int) $job->optimizemaxpx,
+                    'quality' => (int) $job->optimizequality,
+                ])];
+        }
+    }
 }
 $summary->data[] = [get_string('missingonly', 'tool_imageextractor'),
     $job->missingonly ? get_string('yes') : get_string('no')];

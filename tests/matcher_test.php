@@ -196,4 +196,39 @@ final class matcher_test extends \advanced_testcase {
         sort($names);
         $this->assertSame(['a.png', 'b.png'], $names);
     }
+
+    /**
+     * Activity scope: the type limits matches to files stored in that module
+     * type's contexts, the instance-name pattern narrows to named instances
+     * ("Lesson 1*"), and an unknown type is ignored rather than interpolated.
+     */
+    public function test_module_scope(): void {
+        $this->resetAfterTest();
+        $generator = $this->getDataGenerator();
+        $course = $generator->create_course();
+        $page1 = $generator->create_module('page', ['course' => $course->id, 'name' => 'Lesson 1']);
+        $page2 = $generator->create_module('page', ['course' => $course->id, 'name' => 'Lesson 2']);
+        $forum = $generator->create_module('forum', ['course' => $course->id, 'name' => 'Lesson 1 forum']);
+
+        $this->make_file(\context_module::instance($page1->cmid)->id, 'one.png', 'A', 'mod_page', 'content');
+        $this->make_file(\context_module::instance($page2->cmid)->id, 'two.png', 'B', 'mod_page', 'content');
+        $this->make_file(\context_module::instance($forum->cmid)->id, 'three.png', 'C', 'mod_forum', 'intro');
+
+        $base = ['imageonly' => true, 'filenamepattern' => '*.png'];
+
+        // Type alone matches every file stored in that module type.
+        $matcher = new matcher($base + ['modname' => 'page'], false);
+        $this->assertSame(2, $matcher->estimate()['count']);
+
+        // The instance-name pattern narrows to the named instance only.
+        $matcher = new matcher($base + ['modname' => 'page', 'modinstancepattern' => 'Lesson 1*'], false);
+        $rows = $matcher->get_page(0, '', 10, false);
+        $this->assertCount(1, $rows);
+        $this->assertSame('one.png', reset($rows)->filename);
+
+        // A type that is not an installed module is ignored (never used as a
+        // table name), leaving the other criteria in charge.
+        $matcher = new matcher($base + ['component' => 'mod_page', 'modname' => 'bogus'], false);
+        $this->assertSame(2, $matcher->estimate()['count']);
+    }
 }

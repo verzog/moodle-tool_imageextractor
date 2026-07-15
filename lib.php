@@ -113,7 +113,7 @@ function tool_imageextractor_progress_bar(int $done, int $total, bool $approx = 
  */
 function tool_imageextractor_stage_progress(stdClass $job): string {
     $stage = (string) ($job->progressstage ?? '');
-    if (!in_array($stage, ['clear', 'match'], true) || (int) $job->progresstotal <= 0) {
+    if (!in_array($stage, ['clear', 'match', 'optimize'], true) || (int) $job->progresstotal <= 0) {
         return '';
     }
     // The denominator is an upfront estimate for the match scan (files can be
@@ -139,6 +139,47 @@ function tool_imageextractor_render_replace_preview(stdClass $job, moodle_url $v
     unset($viewurl);
 
     $review = \tool_imageextractor\manager::review_summary((int) $job->id);
+
+    // Metadata-only: no thumbnails and no replacement resolution - preview the
+    // planned author/license change against a sample of the current values.
+    if ($job->replacemode === 'metadata') {
+        echo $OUTPUT->heading(get_string('metadatapreviewheading', 'tool_imageextractor'), 3);
+        echo html_writer::div(
+            get_string('reviewsummarytotalmetadata', 'tool_imageextractor', $review['total']),
+            'mb-2'
+        );
+        $planned = [];
+        if ((string) $job->metaauthor !== '') {
+            $planned[] = get_string('metaauthor', 'tool_imageextractor') . ': ' . s($job->metaauthor);
+        }
+        if ((string) $job->metalicense !== '') {
+            $planned[] = get_string('metalicense', 'tool_imageextractor') . ': ' . s($job->metalicense);
+        }
+        if ($planned) {
+            echo html_writer::div(implode(' · ', $planned), 'mb-3 fw-bold');
+        }
+        if ($review['rows']) {
+            $mtable = new html_table();
+            $mtable->attributes['class'] = 'generaltable';
+            $mtable->head = [
+                get_string('colfilename', 'tool_imageextractor'),
+                get_string('component', 'tool_imageextractor'),
+                get_string('colcurrentauthor', 'tool_imageextractor'),
+                get_string('colcurrentlicense', 'tool_imageextractor'),
+            ];
+            foreach ($review['rows'] as $prow) {
+                $mtable->data[] = [
+                    s($prow->filename),
+                    s($prow->component),
+                    s((string) ($prow->author ?? '')),
+                    s((string) ($prow->license ?? '')),
+                ];
+            }
+            echo html_writer::table($mtable);
+        }
+        return;
+    }
+
     echo $OUTPUT->heading(get_string('replacepreviewheading', 'tool_imageextractor'), 3);
     // Report only the total matched, not an exact replace/skip split: the
     // replacement is resolved at apply time, so every matched row still counts

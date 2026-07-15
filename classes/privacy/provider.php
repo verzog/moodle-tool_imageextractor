@@ -63,6 +63,7 @@ class provider implements
             'tool_imageextractor_item',
             [
                 'uploaderid'      => 'privacy:metadata:item:uploaderid',
+                'author'          => 'privacy:metadata:item:author',
                 'filename'        => 'privacy:metadata:item:filename',
                 'contenthash'     => 'privacy:metadata:item:contenthash',
                 'filetimecreated' => 'privacy:metadata:item:filetimecreated',

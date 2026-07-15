@@ -38,6 +38,9 @@ class process_job extends \core\task\adhoc_task {
     /** @var array Cache of contextid => course info for naming. */
     protected $coursecache = [];
 
+    /** @var array Cache of contextid => module info for the export metadata. */
+    protected $modulecache = [];
+
     /**
      * Cap how many of these run in parallel. Packing ZIP volumes is IO-heavy,
      * so the default of 1 keeps a big job from starving the rest of the queue.
@@ -182,6 +185,10 @@ class process_job extends \core\task\adhoc_task {
             $item->filepath = $file->filepath;
             $item->fileitemid = (int) $file->itemid;
             $item->uploaderid = (int) $file->userid;
+            $item->author = $file->author ?? null;
+            $item->license = $file->license ?? null;
+            $item->imagewidth = 0;
+            $item->imageheight = 0;
             $item->filetimecreated = (int) $file->timecreated;
             $item->courseid = (int) $courseinfo->courseid;
             $item->courseshortname = $courseinfo->shortname;
@@ -271,6 +278,18 @@ class process_job extends \core\task\adhoc_task {
             $item->courseid = (int) $courseinfo->courseid;
             $item->courseshortname = $courseinfo->shortname;
 
+            // Image dimensions for the export metadata; false for non-images.
+            $imageinfo = $stored->get_imageinfo();
+            $item->imagewidth = $imageinfo ? (int) $imageinfo['width'] : 0;
+            $item->imageheight = $imageinfo ? (int) $imageinfo['height'] : 0;
+
+            // The activity the file lives in (cached per context), so the
+            // sidecar names the module instance ("Lesson 1") it came from.
+            $moduleinfo = $this->resolve_module((int) $item->contextid);
+            $item->cmid = $moduleinfo->cmid;
+            $item->modname = $moduleinfo->modname;
+            $item->modulename = $moduleinfo->modulename;
+
             // The type-agnostic match left the output name blank; compute it now
             // from the job's naming rule and the item's stored fields (the same
             // placeholders as before). A pre-computed name (the CLI path) is
@@ -283,6 +302,8 @@ class process_job extends \core\task\adhoc_task {
                 'outputname'      => $outputname,
                 'courseid'        => $item->courseid,
                 'courseshortname' => $item->courseshortname,
+                'imagewidth'      => $item->imagewidth,
+                'imageheight'     => $item->imageheight,
             ];
 
             $entry = 'images/' . $outputname;
@@ -451,12 +472,14 @@ class process_job extends \core\task\adhoc_task {
         fputcsv($handle, [
             'outputname', 'originalname', 'volume', 'fileid', 'contenthash',
             'filesize', 'mimetype', 'component', 'filearea', 'fileitemid',
-            'contextid', 'courseid', 'courseshortname', 'uploaderid',
-            'filetimecreated', 'status',
+            'contextid', 'courseid', 'courseshortname', 'cmid', 'module',
+            'modulename', 'uploaderid', 'author', 'license', 'imagewidth',
+            'imageheight', 'filetimecreated', 'status',
         ], ',', '"', '\\');
 
         $rs = $DB->get_recordset('tool_imageextractor_item', ['jobid' => $job->id], 'volume ASC, id ASC');
         foreach ($rs as $item) {
+            $moduleinfo = $this->resolve_module((int) $item->contextid);
             fputcsv($handle, [
                 $item->outputname,
                 $item->filename,
@@ -471,7 +494,14 @@ class process_job extends \core\task\adhoc_task {
                 $item->contextid,
                 $item->courseid,
                 $item->courseshortname,
+                $moduleinfo->cmid ?: '',
+                $moduleinfo->modname,
+                $moduleinfo->modulename,
                 $item->uploaderid,
+                (string) ($item->author ?? ''),
+                (string) ($item->license ?? ''),
+                $item->imagewidth ?: '',
+                $item->imageheight ?: '',
                 $item->filetimecreated ? userdate($item->filetimecreated) : '',
                 $item->status,
             ], ',', '"', '\\');
@@ -511,7 +541,14 @@ class process_job extends \core\task\adhoc_task {
             'contextid'       => (int) $item->contextid,
             'courseid'        => (int) $item->courseid,
             'courseshortname' => $item->courseshortname,
+            'cmid'            => (int) ($item->cmid ?? 0),
+            'module'          => (string) ($item->modname ?? ''),
+            'modulename'      => (string) ($item->modulename ?? ''),
             'uploaderid'      => (int) $item->uploaderid,
+            'author'          => (string) ($item->author ?? ''),
+            'license'         => (string) ($item->license ?? ''),
+            'imagewidth'      => (int) ($item->imagewidth ?? 0),
+            'imageheight'     => (int) ($item->imageheight ?? 0),
             'filetimecreated' => (int) $item->filetimecreated,
         ];
         return json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
@@ -546,6 +583,50 @@ class process_job extends \core\task\adhoc_task {
             'seq'             => $seq,
             'date'            => userdate((int) $item->filetimecreated, '%Y%m%d'),
         ]);
+    }
+
+    /**
+     * Resolve the activity (course module) a file's context belongs to, for
+     * the export metadata: the cmid, the module type ("lesson") and the
+     * instance's display name ("Lesson 1"). Files outside a module context
+     * (course summaries, blocks...) resolve to blanks.
+     *
+     * @param int $contextid
+     * @return \stdClass Object with cmid, modname and modulename.
+     */
+    protected function resolve_module(int $contextid): \stdClass {
+        global $DB;
+
+        if (isset($this->modulecache[$contextid])) {
+            return $this->modulecache[$contextid];
+        }
+
+        $info = (object) ['cmid' => 0, 'modname' => '', 'modulename' => ''];
+        $context = \context::instance_by_id($contextid, IGNORE_MISSING);
+        if ($context && $context->contextlevel == CONTEXT_MODULE) {
+            $cm = $DB->get_record_sql(
+                'SELECT cm.id, cm.instance, md.name AS modname
+                   FROM {course_modules} cm
+                   JOIN {modules} md ON md.id = cm.module
+                  WHERE cm.id = :cmid',
+                ['cmid' => (int) $context->instanceid]
+            );
+            if ($cm) {
+                $info->cmid = (int) $cm->id;
+                $info->modname = $cm->modname;
+                try {
+                    $name = $DB->get_field($cm->modname, 'name', ['id' => $cm->instance], IGNORE_MISSING);
+                    $info->modulename = is_string($name) ? $name : '';
+                } catch (\dml_exception $e) {
+                    // A module whose table is gone (broken uninstall) - leave
+                    // the name blank rather than failing the export.
+                    $info->modulename = '';
+                }
+            }
+        }
+
+        $this->modulecache[$contextid] = $info;
+        return $info;
     }
 
     /**

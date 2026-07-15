@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<XMLDB PATH="admin/tool/imageextractor/db" VERSION="2026071400" COMMENT="Find images in the file storage and export, or restore/replace, them with metadata and naming rules."
+<XMLDB PATH="admin/tool/imageextractor/db" VERSION="2026071500" COMMENT="Find images in the file storage and export, or restore/replace, them with metadata and naming rules."
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:noNamespaceSchemaLocation="../../../../lib/xmldb/xmldb.xsd">
   <TABLES>
@@ -16,6 +16,10 @@
         <FIELD NAME="replacemode" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="single" SEQUENCE="false" COMMENT="Replace job: single, zip or restore."/>
         <FIELD NAME="backup" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" SEQUENCE="false" COMMENT="Replace job: keep a backup of each original so it can be restored."/>
         <FIELD NAME="missingonly" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Replace job: only target files whose stored content is missing/unreadable."/>
+        <FIELD NAME="optimizemaxpx" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Replace job: longest-edge pixel cap applied to uploaded replacements before applying (0 = no optimization)."/>
+        <FIELD NAME="optimizequality" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="85" SEQUENCE="false" COMMENT="Replace job: JPEG/WebP re-encode quality used when optimizing replacements."/>
+        <FIELD NAME="metaauthor" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Metadata-only replace: new author to set on matched files (null/empty = leave unchanged)."/>
+        <FIELD NAME="metalicense" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="Metadata-only replace: new license shortname to set on matched files (null/empty = leave unchanged)."/>
         <FIELD NAME="dedupe" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="1" SEQUENCE="false"/>
         <FIELD NAME="volumesize" TYPE="int" LENGTH="20" NOTNULL="true" DEFAULT="2147483648" SEQUENCE="false" COMMENT="Maximum size of each ZIP volume in bytes."/>
         <FIELD NAME="totalmatched" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
@@ -56,6 +60,10 @@
         <FIELD NAME="filepath" TYPE="char" LENGTH="255" NOTNULL="true" DEFAULT="/" SEQUENCE="false"/>
         <FIELD NAME="fileitemid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="uploaderid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="author" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="The matched file's recorded author, captured at match time for the export metadata."/>
+        <FIELD NAME="license" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="The matched file's license shortname, captured at match time for the export metadata."/>
+        <FIELD NAME="imagewidth" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Image width in pixels, resolved when the file is packed (0 = unknown/not an image)."/>
+        <FIELD NAME="imageheight" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false" COMMENT="Image height in pixels, resolved when the file is packed (0 = unknown/not an image)."/>
         <FIELD NAME="filetimecreated" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="courseid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="courseshortname" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false"/>

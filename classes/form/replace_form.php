@@ -26,6 +26,7 @@ use tool_imageextractor\manager;
 defined('MOODLE_INTERNAL') || die();
 
 require_once($CFG->libdir . '/formslib.php');
+require_once($CFG->libdir . '/licenselib.php');
 
 /**
  * Collects the replacement source (a single image or a ZIP matched by
@@ -49,8 +50,9 @@ class replace_form extends \moodleform {
         $mform->setType('id', PARAM_INT);
 
         $replacemodes = [
-            'single' => get_string('replacemode_single', 'tool_imageextractor'),
-            'zip'    => get_string('replacemode_zip', 'tool_imageextractor'),
+            'single'   => get_string('replacemode_single', 'tool_imageextractor'),
+            'zip'      => get_string('replacemode_zip', 'tool_imageextractor'),
+            'metadata' => get_string('replacemode_metadata', 'tool_imageextractor'),
         ];
         $mform->addElement('select', 'replacemode', get_string('replacemode', 'tool_imageextractor'), $replacemodes);
         $mform->setDefault('replacemode', 'single');
@@ -64,15 +66,77 @@ class replace_form extends \moodleform {
             ['accepted_types' => ['web_image'], 'maxfiles' => 1]
         );
         $mform->hideIf('replacementfile', 'replacemode', 'eq', 'zip');
+        $mform->hideIf('replacementfile', 'replacemode', 'eq', 'metadata');
 
+        // A filemanager rather than a filepicker: a replacement set larger
+        // than the site's upload limit can be supplied as several smaller ZIP
+        // chunks (e.g. re-uploading the extract's volumes one by one), which
+        // all unpack into the same matching pool.
         $mform->addElement(
-            'filepicker',
+            'filemanager',
             'replacementzip',
             get_string('replacementzip', 'tool_imageextractor'),
             null,
-            ['accepted_types' => ['.zip'], 'maxfiles' => 1]
+            ['accepted_types' => ['.zip'], 'maxfiles' => 50, 'subdirs' => 0]
         );
+        $mform->addHelpButton('replacementzip', 'replacementzip', 'tool_imageextractor');
         $mform->hideIf('replacementzip', 'replacemode', 'eq', 'single');
+        $mform->hideIf('replacementzip', 'replacemode', 'eq', 'metadata');
+
+        // Metadata-only mode: the new author and/or license to stamp on every
+        // matched file. Content is never touched.
+        $mform->addElement(
+            'text',
+            'metaauthor',
+            get_string('metaauthor', 'tool_imageextractor'),
+            ['size' => 40]
+        );
+        $mform->setType('metaauthor', PARAM_TEXT);
+        $mform->addHelpButton('metaauthor', 'metaauthor', 'tool_imageextractor');
+        $mform->hideIf('metaauthor', 'replacemode', 'neq', 'metadata');
+
+        $licenses = ['' => get_string('metalicense_keep', 'tool_imageextractor')];
+        foreach (\license_manager::get_active_licenses() as $license) {
+            $licenses[$license->shortname] = $license->fullname;
+        }
+        $mform->addElement('select', 'metalicense', get_string('metalicense', 'tool_imageextractor'), $licenses);
+        $mform->setDefault('metalicense', '');
+        $mform->addHelpButton('metalicense', 'metalicense', 'tool_imageextractor');
+        $mform->hideIf('metalicense', 'replacemode', 'neq', 'metadata');
+
+        // Optimization of the uploaded replacements before they are applied:
+        // cap the longest edge and re-encode at the given quality. Runs in the
+        // background, once per uploaded file.
+        $mform->addElement(
+            'advcheckbox',
+            'optimize',
+            get_string('optimize', 'tool_imageextractor'),
+            get_string('optimize_label', 'tool_imageextractor')
+        );
+        $mform->addHelpButton('optimize', 'optimize', 'tool_imageextractor');
+        $mform->hideIf('optimize', 'replacemode', 'eq', 'metadata');
+
+        $mform->addElement(
+            'text',
+            'optimizemaxpx',
+            get_string('optimizemaxpx', 'tool_imageextractor'),
+            ['size' => 8]
+        );
+        $mform->setType('optimizemaxpx', PARAM_INT);
+        $mform->setDefault('optimizemaxpx', 1920);
+        $mform->hideIf('optimizemaxpx', 'optimize', 'notchecked');
+        $mform->hideIf('optimizemaxpx', 'replacemode', 'eq', 'metadata');
+
+        $mform->addElement(
+            'text',
+            'optimizequality',
+            get_string('optimizequality', 'tool_imageextractor'),
+            ['size' => 8]
+        );
+        $mform->setType('optimizequality', PARAM_INT);
+        $mform->setDefault('optimizequality', 85);
+        $mform->hideIf('optimizequality', 'optimize', 'notchecked');
+        $mform->hideIf('optimizequality', 'replacemode', 'eq', 'metadata');
 
         $mform->addElement(
             'advcheckbox',
@@ -81,6 +145,7 @@ class replace_form extends \moodleform {
             get_string('backup_help', 'tool_imageextractor')
         );
         $mform->setDefault('backup', 1);
+        $mform->hideIf('backup', 'replacemode', 'eq', 'metadata');
 
         $mform->addElement('submit', 'replacesubmit', get_string('replacecontinue', 'tool_imageextractor'));
     }
@@ -103,6 +168,27 @@ class replace_form extends \moodleform {
         $storedmode = $this->_customdata['storedreplacemode'] ?? '';
         $hasstoredsource = !empty($this->_customdata['hasstoredsource']);
         $hasstored = $hasstoredsource && $mode === $storedmode;
+
+        // Metadata-only mode needs no upload, but changing nothing is a no-op:
+        // require a new author and/or a license.
+        if ($mode === 'metadata') {
+            if (trim((string) ($data['metaauthor'] ?? '')) === '' && trim((string) ($data['metalicense'] ?? '')) === '') {
+                $errors['metaauthor'] = get_string('errornometadata', 'tool_imageextractor');
+            }
+            return $errors;
+        }
+
+        // Optimization bounds - only meaningful when switched on.
+        if (!empty($data['optimize'])) {
+            $maxpx = (int) ($data['optimizemaxpx'] ?? 0);
+            if ($maxpx < 16 || $maxpx > 20000) {
+                $errors['optimizemaxpx'] = get_string('erroroptimizemaxpx', 'tool_imageextractor');
+            }
+            $quality = (int) ($data['optimizequality'] ?? 0);
+            if ($quality < 1 || $quality > 100) {
+                $errors['optimizequality'] = get_string('erroroptimizequality', 'tool_imageextractor');
+            }
+        }
 
         // The upload is checked by inspecting the submitted draft area, NOT via
         // get_new_filename(): that method calls is_validated(), which runs this
