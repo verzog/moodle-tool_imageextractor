@@ -22,6 +22,9 @@
 namespace tool_imageextractor\task;
 
 use tool_imageextractor\manager;
+use tool_imageextractor\replace_job_maker;
+
+require_once(__DIR__ . '/../fixtures/replace_job_maker.php');
 
 /**
  * Tests for the two-phase replace task flow (analyse, review, apply).
@@ -30,6 +33,8 @@ use tool_imageextractor\manager;
  * @covers \tool_imageextractor\manager
  */
 final class process_replace_test extends \advanced_testcase {
+    use replace_job_maker;
+
     /**
      * Enable the plugin and the replace feature.
      *
@@ -89,41 +94,10 @@ final class process_replace_test extends \advanced_testcase {
      * @return \stdClass The job record.
      */
     protected function make_replace_job(string $replacementcontent): \stdClass {
-        global $DB, $USER;
-
-        $now = time();
-        $job = (object) [
-            'name'         => 'Async replace',
-            'jobtype'      => 'replace',
-            'status'       => manager::STATUS_DRAFT,
-            'criteria'     => json_encode([
-                'imageonly' => true,
-                'component' => 'mod_label',
-                'filearea'  => 'intro',
-            ]),
-            'csvmode'      => 'none',
-            'namingrule'   => '{originalname}',
-            'replacemode'  => 'single',
-            'backup'       => 1,
-            'missingonly'  => 0,
-            'dedupe'       => 0,
-            'volumesize'   => 1048576,
-            'usermodified' => $USER->id,
-            'timecreated'  => $now,
-            'timemodified' => $now,
-        ];
-        $job->id = $DB->insert_record('tool_imageextractor_job', $job);
-
-        get_file_storage()->create_file_from_string([
-            'contextid' => \context_system::instance()->id,
-            'component' => manager::COMPONENT,
-            'filearea'  => 'replacement',
-            'itemid'    => $job->id,
-            'filepath'  => '/',
-            'filename'  => 'new.png',
-        ], $replacementcontent);
-
-        return $DB->get_record('tool_imageextractor_job', ['id' => $job->id]);
+        return $this->make_replace_job_record(
+            ['name' => 'Async replace', 'status' => manager::STATUS_DRAFT],
+            $replacementcontent
+        );
     }
 
     /**

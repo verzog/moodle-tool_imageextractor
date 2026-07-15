@@ -224,34 +224,14 @@ class replacer {
             }
 
             // The match is type-agnostic: it records the file as a pending item
-            // without resolving a replacement or computing an output name. The
-            // extract action names it at pack time; the replace action resolves
-            // (and possibly skips) it at apply time.
-            $item = new \stdClass();
-            $item->jobid = (int) $this->job->id;
-            $item->fileid = (int) $file->id;
-            $item->contenthash = $file->contenthash;
-            $item->filename = $file->filename;
-            $item->filesize = (int) $file->filesize;
-            $item->mimetype = $file->mimetype;
-            $item->contextid = (int) $file->contextid;
-            $item->component = $file->component;
-            $item->filearea = $file->filearea;
-            $item->filepath = $file->filepath;
-            $item->fileitemid = (int) $file->itemid;
-            $item->uploaderid = (int) $file->userid;
-            $item->author = $file->author ?? null;
-            $item->license = $file->license ?? null;
-            $item->imagewidth = 0;
-            $item->imageheight = 0;
-            $item->filetimecreated = (int) $file->timecreated;
+            // without resolving a course, replacement or computing an output
+            // name. The extract action names it at pack time; the replace
+            // action resolves (and possibly skips) it at apply time.
+            $item = manager::item_from_file((int) $this->job->id, $file);
             $item->courseid = 0;
             $item->outputname = '';
             $item->replacementname = null;
             $item->note = null;
-            $item->volume = 0;
-            $item->status = 'pending';
-            $item->timeprocessed = 0;
             $batch[] = $item;
 
             $matched++;
@@ -524,8 +504,8 @@ class replacer {
                     ]);
                     continue;
                 }
-                $oldnote = get_string('altwas', 'tool_imageextractor',
-                    \core_text::substr(implode(' | ', array_unique($oldalts)), 0, 200));
+                $prevdesc = \core_text::substr(implode(' | ', array_unique($oldalts)), 0, 200);
+                $oldnote = get_string('altwas', 'tool_imageextractor', $prevdesc);
                 $DB->update_record('tool_imageextractor_item', (object) [
                     'id'            => $item->id,
                     'status'        => 'done',

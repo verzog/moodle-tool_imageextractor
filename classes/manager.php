@@ -185,6 +185,42 @@ class manager {
     }
 
     /**
+     * Build a pending item row from a matched file row, populating the fields
+     * that are common to both the extract match (task\process_job) and the
+     * replace match (replacer): the file's identity, location and captured
+     * metadata. The caller fills in the parts that differ - the resolved course
+     * and the output/replacement naming.
+     *
+     * @param int $jobid
+     * @param \stdClass $file A matched {files} row from the matcher.
+     * @return \stdClass A partial tool_imageextractor_item record.
+     */
+    public static function item_from_file(int $jobid, \stdClass $file): \stdClass {
+        $item = new \stdClass();
+        $item->jobid = $jobid;
+        $item->fileid = (int) $file->id;
+        $item->contenthash = $file->contenthash;
+        $item->filename = $file->filename;
+        $item->filesize = (int) $file->filesize;
+        $item->mimetype = $file->mimetype;
+        $item->contextid = (int) $file->contextid;
+        $item->component = $file->component;
+        $item->filearea = $file->filearea;
+        $item->filepath = $file->filepath;
+        $item->fileitemid = (int) $file->itemid;
+        $item->uploaderid = (int) $file->userid;
+        $item->author = $file->author ?? null;
+        $item->license = $file->license ?? null;
+        $item->imagewidth = 0;
+        $item->imageheight = 0;
+        $item->filetimecreated = (int) $file->timecreated;
+        $item->volume = 0;
+        $item->status = 'pending';
+        $item->timeprocessed = 0;
+        return $item;
+    }
+
+    /**
      * Load one job.
      *
      * @param int $id

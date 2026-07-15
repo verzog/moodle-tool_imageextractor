@@ -190,8 +190,8 @@ class htmllocator {
             }
             return $newtag;
         }, $html);
-        // preg_replace_callback returns null only on internal error; keep the
-        // original HTML rather than blanking the field if that ever happens.
+        // A null result means preg_replace_callback hit an internal error; keep
+        // the original HTML rather than blanking the field if that ever happens.
         return [$result === null ? $html : $result, $changed];
     }
 

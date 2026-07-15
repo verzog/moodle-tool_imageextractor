@@ -172,30 +172,12 @@ class process_job extends \core\task\adhoc_task {
             ]);
             $outputname = naming::ensure_unique($outputname, $seen);
 
-            $item = new \stdClass();
-            $item->jobid = $job->id;
-            $item->fileid = (int) $file->id;
-            $item->contenthash = $file->contenthash;
-            $item->filename = $file->filename;
-            $item->filesize = (int) $file->filesize;
-            $item->mimetype = $file->mimetype;
-            $item->contextid = (int) $file->contextid;
-            $item->component = $file->component;
-            $item->filearea = $file->filearea;
-            $item->filepath = $file->filepath;
-            $item->fileitemid = (int) $file->itemid;
-            $item->uploaderid = (int) $file->userid;
-            $item->author = $file->author ?? null;
-            $item->license = $file->license ?? null;
-            $item->imagewidth = 0;
-            $item->imageheight = 0;
-            $item->filetimecreated = (int) $file->timecreated;
+            // Extract records the resolved course and the packed output name on
+            // top of the file's common fields.
+            $item = manager::item_from_file((int) $job->id, $file);
             $item->courseid = (int) $courseinfo->courseid;
             $item->courseshortname = $courseinfo->shortname;
             $item->outputname = $outputname;
-            $item->volume = 0;
-            $item->status = 'pending';
-            $item->timeprocessed = 0;
             $batch[] = $item;
 
             $count++;

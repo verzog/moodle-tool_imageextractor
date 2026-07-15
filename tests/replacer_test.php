@@ -21,12 +21,16 @@
 
 namespace tool_imageextractor;
 
+require_once(__DIR__ . '/fixtures/replace_job_maker.php');
+
 /**
  * Tests for the replace/restore engine.
  *
  * @covers \tool_imageextractor\replacer
  */
 final class replacer_test extends \advanced_testcase {
+    use replace_job_maker;
+
     /**
      * Create a replace job record and its single replacement source.
      *
@@ -35,38 +39,7 @@ final class replacer_test extends \advanced_testcase {
      * @return \stdClass The job record.
      */
     protected function make_replace_job(array $criteria, string $replacementcontent): \stdClass {
-        global $DB, $USER;
-
-        $now = time();
-        $job = (object) [
-            'name'         => 'Test replace',
-            'jobtype'      => 'replace',
-            'status'       => manager::STATUS_QUEUED,
-            'criteria'     => json_encode($criteria),
-            'csvmode'      => 'none',
-            'namingrule'   => '{originalname}',
-            'replacemode'  => 'single',
-            'backup'       => 1,
-            'missingonly'  => 0,
-            'dedupe'       => 0,
-            'volumesize'   => 1048576,
-            'usermodified' => $USER->id,
-            'timecreated'  => $now,
-            'timemodified' => $now,
-        ];
-        $job->id = $DB->insert_record('tool_imageextractor_job', $job);
-
-        // Store the single replacement image in the job's replacement area.
-        get_file_storage()->create_file_from_string([
-            'contextid' => \context_system::instance()->id,
-            'component' => manager::COMPONENT,
-            'filearea'  => 'replacement',
-            'itemid'    => $job->id,
-            'filepath'  => '/',
-            'filename'  => 'new.png',
-        ], $replacementcontent);
-
-        return $DB->get_record('tool_imageextractor_job', ['id' => $job->id]);
+        return $this->make_replace_job_record(['criteria' => json_encode($criteria)], $replacementcontent);
     }
 
     /**
@@ -421,7 +394,7 @@ final class replacer_test extends \advanced_testcase {
      * from the uploaded CSV, without touching the file content.
      */
     public function test_alttext_apply_updates_embedding_html(): void {
-        global $DB, $USER;
+        global $DB;
         $this->resetAfterTest();
 
         $course = $this->getDataGenerator()->create_course();
@@ -442,24 +415,11 @@ final class replacer_test extends \advanced_testcase {
 
         // A replace job scoped to the page content, in alt-text mode, with a
         // descriptions CSV mapping the file name to its new alt text.
-        $now = time();
-        $job = (object) [
-            'name'         => 'Alt text',
-            'jobtype'      => 'replace',
-            'status'       => manager::STATUS_QUEUED,
-            'criteria'     => json_encode(['imageonly' => true, 'component' => 'mod_page', 'filearea' => 'content']),
-            'csvmode'      => 'none',
-            'namingrule'   => '{originalname}',
-            'replacemode'  => 'alttext',
-            'backup'       => 0,
-            'missingonly'  => 0,
-            'dedupe'       => 0,
-            'volumesize'   => 1048576,
-            'usermodified' => $USER->id,
-            'timecreated'  => $now,
-            'timemodified' => $now,
-        ];
-        $job->id = $DB->insert_record('tool_imageextractor_job', $job);
+        $job = $this->make_replace_job_record([
+            'criteria'    => json_encode(['imageonly' => true, 'component' => 'mod_page', 'filearea' => 'content']),
+            'replacemode' => 'alttext',
+            'backup'      => 0,
+        ], 'unused');
         get_file_storage()->create_file_from_string([
             'contextid' => \context_system::instance()->id,
             'component' => manager::COMPONENT,
@@ -468,7 +428,6 @@ final class replacer_test extends \advanced_testcase {
             'filepath'  => '/',
             'filename'  => 'alt.csv',
         ], "filename,alttext\npic.png,\"A helpful diagram\"\n");
-        $job = $DB->get_record('tool_imageextractor_job', ['id' => $job->id]);
 
         $replacer = new replacer($job);
         $replacer->prepare();
