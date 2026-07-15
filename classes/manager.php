@@ -597,6 +597,30 @@ class manager {
     }
 
     /**
+     * Count the distinct replacement images stored for a replace job.
+     *
+     * A ZIP source is unpacked into per-chunk folders and matched to targets by
+     * basename (folders ignored), so several chunks can hold the same entry name;
+     * the meaningful figure is the number of distinct basenames - i.e. how many
+     * targets can actually be matched a replacement - not the raw stored count.
+     * A single-image source is one file. Returns 0 for a source that is not on
+     * disk (metadata/alt-text modes, or a not-yet-uploaded job).
+     *
+     * @param int $jobid
+     * @return int
+     */
+    public static function replacement_file_count(int $jobid): int {
+        $context = self::context();
+        $fs = get_file_storage();
+        $files = $fs->get_area_files($context->id, self::COMPONENT, 'replacement', $jobid, 'id', false);
+        $names = [];
+        foreach ($files as $file) {
+            $names[strtolower($file->get_filename())] = true;
+        }
+        return count($names);
+    }
+
+    /**
      * Whether a user draft file area holds at least one file.
      *
      * This is the recursion-safe way for a form's validation() to check that

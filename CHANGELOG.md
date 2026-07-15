@@ -6,6 +6,19 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.18.2-beta] — 2026-07-15
+
+Build `2026071505`.
+
+### Added
+- **The job summary now shows how many replacement images were uploaded.** A
+  content replace (single image or ZIP-matched-by-filename) lists a "Replacement
+  images uploaded" row counting the distinct replacement basenames actually
+  stored. Seen alongside the "Matched files" total it makes plain that a ZIP only
+  replaces the matched files whose name it carries — e.g. 51 replacement images
+  against 407 matched files — with the remainder left unchanged, rather than the
+  page only describing the match-list criteria.
+
 ## [0.18.1-beta] — 2026-07-15
 
 Build `2026071504`.

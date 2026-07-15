@@ -190,6 +190,7 @@ $string['replaced'] = 'Replaced';
 $string['replacedisabled'] = 'Replace/restore jobs are disabled. A site administrator must enable them in the plugin settings.';
 $string['replacement'] = 'Replacement';
 $string['replacementfile'] = 'Replacement image';
+$string['replacementfilecount'] = 'Replacement images uploaded';
 $string['replacementzip'] = 'Replacement ZIP(s)';
 $string['replacementzip_help'] = 'One or more ZIP archives of replacement images. A replacement set larger than the site\'s upload limit can be uploaded as several smaller ZIP chunks (for example, re-uploading the extracted volumes one by one after watermarking); the entries of every chunk are pooled together and matched to targets by filename, ignoring any folder structure.';
 $string['replacemode'] = 'Replacement source';
