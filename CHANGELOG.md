@@ -6,6 +6,36 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.16.0-beta] — 2026-07-15
+
+Build `2026071501`.
+
+### Added
+- **Image descriptions (alt text) in the export.** The manifest CSV and the
+  JSON sidecars now carry each image's description, read from the alt attribute
+  of the `<img>` tag in the course content that embeds it (page and module
+  content/intro, book chapters, lesson pages, forum posts, glossary entries,
+  question text, course/section summaries). Images with no description show
+  blank — so the manifest doubles as an accessibility audit of undescribed
+  images. Stored on a new `alttext` item field.
+- **Alt-text replace mode.** A fourth replace mode rewrites image descriptions
+  in the course content that embeds them, from an uploaded `filename,alttext`
+  CSV — the exported manifest edited in place drops straight back in. Only the
+  matched `<img>` tags' alt attributes are touched (the rest of the markup is
+  left byte-for-byte unchanged); image content is never altered. Admin-only
+  with a confirmation and a preview of current-vs-new descriptions; the
+  previous description is recorded per item. A new `htmllocator` class maps a
+  file back to its embedding HTML field and reads/writes the alt text.
+
+### Fixed
+- **Restore now puts back the backup's own metadata** (author, licence,
+  uploader, creation time) rather than leaving the replacement's metadata on
+  the restored original — visible on jobs replaced before content-preservation
+  existed. (Codex review.)
+- **The captured author name is cleared on erasure.** It is exported in a user
+  data request and anonymised together with the uploader attribution in the
+  per-user, multi-user and context-wide privacy deletions. (Codex review.)
+
 ## [0.15.0-beta] — 2026-07-15
 
 Build `2026071500`.

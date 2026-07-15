@@ -171,21 +171,20 @@ if ($action !== '' && confirm_sesskey()) {
             \core\notification::error(get_string('errorcsvcriteriareplace', 'tool_imageextractor'));
             redirect($viewurl);
         }
-        // A metadata-only run never rewrites content, so it gets a gentler
+        // Only single/zip modes rewrite live image content; metadata and
+        // alt-text modes leave the files intact, so each gets a gentler
         // warning and its own confirmation wording.
-        $ismetadataonly = ($job->replacemode === 'metadata');
+        $warnings = [
+            'metadata' => ['metadatawarning', 'confirmmetadatafinal', 'warning'],
+            'alttext'  => ['altwarning', 'confirmaltfinal', 'warning'],
+        ];
+        [$warnkey, $confirmkey, $notiftype] = $warnings[$job->replacemode]
+            ?? ['replacewarning', 'confirmreplacefinal', 'error'];
         echo $OUTPUT->header();
-        echo $OUTPUT->notification(
-            get_string($ismetadataonly ? 'metadatawarning' : 'replacewarning', 'tool_imageextractor'),
-            $ismetadataonly ? 'warning' : 'error'
-        );
+        echo $OUTPUT->notification(get_string($warnkey, 'tool_imageextractor'), $notiftype);
         tool_imageextractor_render_replace_preview($job, $viewurl);
         echo $OUTPUT->confirm(
-            get_string(
-                $ismetadataonly ? 'confirmmetadatafinal' : 'confirmreplacefinal',
-                'tool_imageextractor',
-                (int) $job->totalmatched
-            ),
+            get_string($confirmkey, 'tool_imageextractor', (int) $job->totalmatched),
             new moodle_url($viewurl, ['action' => 'replacerun', 'confirm' => 1, 'sesskey' => sesskey()]),
             $viewurl
         );
@@ -307,7 +306,9 @@ if ($isreplace) {
         if ((string) $job->metalicense !== '') {
             $summary->data[] = [get_string('metalicense', 'tool_imageextractor'), s($job->metalicense)];
         }
-    } else {
+    } else if ($job->replacemode !== 'alttext') {
+        // Content replace (single/zip): show backup and any optimization.
+        // Alt-text mode touches neither content nor files, so it shows nothing.
         $summary->data[] = [get_string('backup', 'tool_imageextractor'),
             $job->backup ? get_string('yes') : get_string('no')];
         if ((int) $job->optimizemaxpx > 0) {

@@ -367,6 +367,124 @@ final class replacer_test extends \advanced_testcase {
     }
 
     /**
+     * Restore puts back the backup's own metadata, not the metadata that sits
+     * on the replaced live file (which matters for a job replaced before
+     * content-preservation existed - its replacement carries different values).
+     */
+    public function test_restore_uses_backup_metadata(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+        $location = [
+            'contextid' => $context->id,
+            'component' => 'mod_label',
+            'filearea'  => 'intro',
+            'itemid'    => 0,
+            'filepath'  => '/',
+            'filename'  => 'logo.png',
+        ];
+        $original = $fs->create_file_from_string($location, 'ORIGINAL');
+        $original->set_author('Original Author');
+        $original->set_license('cc-4.0');
+
+        $job = $this->make_replace_job(
+            ['imageonly' => true, 'component' => 'mod_label', 'filearea' => 'intro'],
+            'NEW'
+        );
+        $replacer = new replacer($job);
+        $replacer->prepare();
+        $this->assertSame(0, $replacer->apply_batch(10));
+
+        // Simulate an old-code replacement whose live file lost the original
+        // metadata (author/licence now belong to the uploaded replacement).
+        $replaced = $fs->get_file($context->id, 'mod_label', 'intro', 0, '/', 'logo.png');
+        $replaced->set_author('Replacement Author');
+        $replaced->set_license('allrightsreserved');
+
+        $this->assertSame(0, $replacer->restore_batch(10));
+
+        $restored = $fs->get_file($context->id, 'mod_label', 'intro', 0, '/', 'logo.png');
+        $this->assertSame('ORIGINAL', $restored->get_content());
+        // The backup carried the original metadata, so restore brings it back
+        // rather than leaving the replacement's behind.
+        $this->assertSame('Original Author', $restored->get_author());
+        $this->assertSame('cc-4.0', $restored->get_license());
+    }
+
+    /**
+     * Alt-text mode rewrites the description in the HTML that embeds the image,
+     * from the uploaded CSV, without touching the file content.
+     */
+    public function test_alttext_apply_updates_embedding_html(): void {
+        global $DB, $USER;
+        $this->resetAfterTest();
+
+        $course = $this->getDataGenerator()->create_course();
+        $page = $this->getDataGenerator()->create_module('page', [
+            'course'        => $course->id,
+            'content'       => '<p><img src="@@PLUGINFILE@@/pic.png" alt="before"></p>',
+            'contentformat' => FORMAT_HTML,
+        ]);
+        $modcontext = \context_module::instance($page->cmid);
+        get_file_storage()->create_file_from_string([
+            'contextid' => $modcontext->id,
+            'component' => 'mod_page',
+            'filearea'  => 'content',
+            'itemid'    => 0,
+            'filepath'  => '/',
+            'filename'  => 'pic.png',
+        ], 'PNGDATA');
+
+        // A replace job scoped to the page content, in alt-text mode, with a
+        // descriptions CSV mapping the file name to its new alt text.
+        $now = time();
+        $job = (object) [
+            'name'         => 'Alt text',
+            'jobtype'      => 'replace',
+            'status'       => manager::STATUS_QUEUED,
+            'criteria'     => json_encode(['imageonly' => true, 'component' => 'mod_page', 'filearea' => 'content']),
+            'csvmode'      => 'none',
+            'namingrule'   => '{originalname}',
+            'replacemode'  => 'alttext',
+            'backup'       => 0,
+            'missingonly'  => 0,
+            'dedupe'       => 0,
+            'volumesize'   => 1048576,
+            'usermodified' => $USER->id,
+            'timecreated'  => $now,
+            'timemodified' => $now,
+        ];
+        $job->id = $DB->insert_record('tool_imageextractor_job', $job);
+        get_file_storage()->create_file_from_string([
+            'contextid' => \context_system::instance()->id,
+            'component' => manager::COMPONENT,
+            'filearea'  => 'altcsv',
+            'itemid'    => $job->id,
+            'filepath'  => '/',
+            'filename'  => 'alt.csv',
+        ], "filename,alttext\npic.png,\"A helpful diagram\"\n");
+        $job = $DB->get_record('tool_imageextractor_job', ['id' => $job->id]);
+
+        $replacer = new replacer($job);
+        $replacer->prepare();
+        $this->assertSame(0, $replacer->apply_batch(10));
+
+        $item = $DB->get_record('tool_imageextractor_item', ['jobid' => $job->id]);
+        $this->assertSame('done', $item->status);
+        $this->assertStringContainsString('before', $item->note);
+
+        // The page content now carries the new description; the file bytes are
+        // untouched.
+        $content = $DB->get_field('page', 'content', ['id' => $page->id]);
+        $this->assertStringContainsString('alt="A helpful diagram"', $content);
+        $this->assertStringNotContainsString('alt="before"', $content);
+        $stored = get_file_storage()->get_file($modcontext->id, 'mod_page', 'content', 0, '/', 'pic.png');
+        $this->assertSame('PNGDATA', $stored->get_content());
+    }
+
+    /**
      * A content replace preserves the target's own metadata (author, licence)
      * across the swap instead of adopting the uploaded replacement's.
      */

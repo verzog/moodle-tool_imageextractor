@@ -155,6 +155,7 @@ class provider implements
                 $itemexport = array_map(static function ($item) {
                     return (object) [
                         'filename'        => $item->filename,
+                        'author'          => $item->author,
                         'contenthash'     => $item->contenthash,
                         'filetimecreated' => $item->filetimecreated
                             ? transform::datetime($item->filetimecreated) : null,
@@ -185,6 +186,9 @@ class provider implements
             return;
         }
         $DB->set_field('tool_imageextractor_job', 'usermodified', 0, []);
+        // The captured author string can be a person's name, so it is cleared
+        // with the uploader attribution rather than left behind.
+        $DB->set_field('tool_imageextractor_item', 'author', null, []);
         $DB->set_field('tool_imageextractor_item', 'uploaderid', 0, []);
     }
 
@@ -201,6 +205,9 @@ class provider implements
                 continue;
             }
             $DB->set_field('tool_imageextractor_job', 'usermodified', 0, ['usermodified' => $user->id]);
+            // Clear the captured author name on this user's items before the
+            // uploaderid (the key that finds them) is zeroed.
+            $DB->set_field('tool_imageextractor_item', 'author', null, ['uploaderid' => $user->id]);
             $DB->set_field('tool_imageextractor_item', 'uploaderid', 0, ['uploaderid' => $user->id]);
         }
     }
@@ -224,8 +231,10 @@ class provider implements
             "UPDATE {tool_imageextractor_job} SET usermodified = 0 WHERE usermodified $insql",
             $params
         );
+        // Clear the captured author name together with the uploader attribution
+        // on these users' items (one pass, before uploaderid is zeroed).
         $DB->execute(
-            "UPDATE {tool_imageextractor_item} SET uploaderid = 0 WHERE uploaderid $insql",
+            "UPDATE {tool_imageextractor_item} SET author = NULL, uploaderid = 0 WHERE uploaderid $insql",
             $params
         );
     }

@@ -53,6 +53,7 @@ class replace_form extends \moodleform {
             'single'   => get_string('replacemode_single', 'tool_imageextractor'),
             'zip'      => get_string('replacemode_zip', 'tool_imageextractor'),
             'metadata' => get_string('replacemode_metadata', 'tool_imageextractor'),
+            'alttext'  => get_string('replacemode_alttext', 'tool_imageextractor'),
         ];
         $mform->addElement('select', 'replacemode', get_string('replacemode', 'tool_imageextractor'), $replacemodes);
         $mform->setDefault('replacemode', 'single');
@@ -67,6 +68,7 @@ class replace_form extends \moodleform {
         );
         $mform->hideIf('replacementfile', 'replacemode', 'eq', 'zip');
         $mform->hideIf('replacementfile', 'replacemode', 'eq', 'metadata');
+        $mform->hideIf('replacementfile', 'replacemode', 'eq', 'alttext');
 
         // A filemanager rather than a filepicker: a replacement set larger
         // than the site's upload limit can be supplied as several smaller ZIP
@@ -82,6 +84,20 @@ class replace_form extends \moodleform {
         $mform->addHelpButton('replacementzip', 'replacementzip', 'tool_imageextractor');
         $mform->hideIf('replacementzip', 'replacemode', 'eq', 'single');
         $mform->hideIf('replacementzip', 'replacemode', 'eq', 'metadata');
+        $mform->hideIf('replacementzip', 'replacemode', 'eq', 'alttext');
+
+        // Alt-text mode: a CSV mapping each file name to the description to
+        // write. The exported manifest (filename + alttext columns) is the
+        // natural starting point - edit its alttext column and upload it here.
+        $mform->addElement(
+            'filepicker',
+            'altcsvfile',
+            get_string('altcsvfile', 'tool_imageextractor'),
+            null,
+            ['accepted_types' => ['.csv', '.txt'], 'maxfiles' => 1]
+        );
+        $mform->addHelpButton('altcsvfile', 'altcsvfile', 'tool_imageextractor');
+        $mform->hideIf('altcsvfile', 'replacemode', 'neq', 'alttext');
 
         // Metadata-only mode: the new author and/or license to stamp on every
         // matched file. Content is never touched.
@@ -115,6 +131,7 @@ class replace_form extends \moodleform {
         );
         $mform->addHelpButton('optimize', 'optimize', 'tool_imageextractor');
         $mform->hideIf('optimize', 'replacemode', 'eq', 'metadata');
+        $mform->hideIf('optimize', 'replacemode', 'eq', 'alttext');
 
         $mform->addElement(
             'text',
@@ -126,6 +143,7 @@ class replace_form extends \moodleform {
         $mform->setDefault('optimizemaxpx', 1920);
         $mform->hideIf('optimizemaxpx', 'optimize', 'notchecked');
         $mform->hideIf('optimizemaxpx', 'replacemode', 'eq', 'metadata');
+        $mform->hideIf('optimizemaxpx', 'replacemode', 'eq', 'alttext');
 
         $mform->addElement(
             'text',
@@ -137,6 +155,7 @@ class replace_form extends \moodleform {
         $mform->setDefault('optimizequality', 85);
         $mform->hideIf('optimizequality', 'optimize', 'notchecked');
         $mform->hideIf('optimizequality', 'replacemode', 'eq', 'metadata');
+        $mform->hideIf('optimizequality', 'replacemode', 'eq', 'alttext');
 
         $mform->addElement(
             'advcheckbox',
@@ -146,6 +165,7 @@ class replace_form extends \moodleform {
         );
         $mform->setDefault('backup', 1);
         $mform->hideIf('backup', 'replacemode', 'eq', 'metadata');
+        $mform->hideIf('backup', 'replacemode', 'eq', 'alttext');
 
         $mform->addElement('submit', 'replacesubmit', get_string('replacecontinue', 'tool_imageextractor'));
     }
@@ -174,6 +194,15 @@ class replace_form extends \moodleform {
         if ($mode === 'metadata') {
             if (trim((string) ($data['metaauthor'] ?? '')) === '' && trim((string) ($data['metalicense'] ?? '')) === '') {
                 $errors['metaauthor'] = get_string('errornometadata', 'tool_imageextractor');
+            }
+            return $errors;
+        }
+
+        // Alt-text mode requires the description CSV (checked via the draft
+        // area directly, never get_new_filename() - see the note below).
+        if ($mode === 'alttext') {
+            if (!manager::draft_has_file((int) ($data['altcsvfile'] ?? 0))) {
+                $errors['altcsvfile'] = get_string('erroraltcsvrequired', 'tool_imageextractor');
             }
             return $errors;
         }

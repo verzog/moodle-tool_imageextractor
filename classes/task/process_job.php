@@ -290,6 +290,11 @@ class process_job extends \core\task\adhoc_task {
             $item->modname = $moduleinfo->modname;
             $item->modulename = $moduleinfo->modulename;
 
+            // The image's description (alt text), read from the HTML that
+            // embeds it. Blank when the file is not embedded in a mapped
+            // rich-text field, or is embedded without a description.
+            $item->alttext = $this->resolve_alt($item);
+
             // The type-agnostic match left the output name blank; compute it now
             // from the job's naming rule and the item's stored fields (the same
             // placeholders as before). A pre-computed name (the CLI path) is
@@ -304,6 +309,7 @@ class process_job extends \core\task\adhoc_task {
                 'courseshortname' => $item->courseshortname,
                 'imagewidth'      => $item->imagewidth,
                 'imageheight'     => $item->imageheight,
+                'alttext'         => $item->alttext,
             ];
 
             $entry = 'images/' . $outputname;
@@ -474,7 +480,7 @@ class process_job extends \core\task\adhoc_task {
             'filesize', 'mimetype', 'component', 'filearea', 'fileitemid',
             'contextid', 'courseid', 'courseshortname', 'cmid', 'module',
             'modulename', 'uploaderid', 'author', 'license', 'imagewidth',
-            'imageheight', 'filetimecreated', 'status',
+            'imageheight', 'alttext', 'filetimecreated', 'status',
         ], ',', '"', '\\');
 
         $rs = $DB->get_recordset('tool_imageextractor_item', ['jobid' => $job->id], 'volume ASC, id ASC');
@@ -502,6 +508,7 @@ class process_job extends \core\task\adhoc_task {
                 (string) ($item->license ?? ''),
                 $item->imagewidth ?: '',
                 $item->imageheight ?: '',
+                (string) ($item->alttext ?? ''),
                 $item->filetimecreated ? userdate($item->filetimecreated) : '',
                 $item->status,
             ], ',', '"', '\\');
@@ -549,6 +556,7 @@ class process_job extends \core\task\adhoc_task {
             'license'         => (string) ($item->license ?? ''),
             'imagewidth'      => (int) ($item->imagewidth ?? 0),
             'imageheight'     => (int) ($item->imageheight ?? 0),
+            'alttext'         => (string) ($item->alttext ?? ''),
             'filetimecreated' => (int) $item->filetimecreated,
         ];
         return json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
@@ -583,6 +591,31 @@ class process_job extends \core\task\adhoc_task {
             'seq'             => $seq,
             'date'            => userdate((int) $item->filetimecreated, '%Y%m%d'),
         ]);
+    }
+
+    /**
+     * Resolve the description (alt text) of a matched image by reading the HTML
+     * field that embeds it. Only images can carry a description, and only when
+     * embedded in a mapped rich-text field; everything else is blank. When an
+     * image is embedded more than once with different descriptions, they are
+     * joined so the export shows every one.
+     *
+     * @param \stdClass $item The matched item row (mid-pack, fields populated).
+     * @return string
+     */
+    protected function resolve_alt(\stdClass $item): string {
+        if (strpos((string) $item->mimetype, 'image/') !== 0) {
+            return '';
+        }
+        $alts = [];
+        foreach (\tool_imageextractor\htmllocator::locate($item) as $location) {
+            foreach (\tool_imageextractor\htmllocator::extract_alts($location->html, $item->filename) as $alt) {
+                if (trim($alt) !== '' && !in_array($alt, $alts, true)) {
+                    $alts[] = $alt;
+                }
+            }
+        }
+        return \core_text::substr(implode(' | ', $alts), 0, 65535);
     }
 
     /**

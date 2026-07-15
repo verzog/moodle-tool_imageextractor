@@ -375,7 +375,7 @@ class manager {
         global $DB, $USER;
 
         $mode = (string) ($data->replacemode ?? 'single');
-        if (!in_array($mode, ['single', 'zip', 'metadata'], true)) {
+        if (!in_array($mode, ['single', 'zip', 'metadata', 'alttext'], true)) {
             $mode = 'single';
         }
 
@@ -395,6 +395,28 @@ class manager {
             $record->metalicense = trim((string) ($data->metalicense ?? ''));
             $record->optimizemaxpx = 0;
             $DB->update_record('tool_imageextractor_job', $record);
+            return;
+        }
+
+        if ($mode === 'alttext') {
+            // Alt-text: only the description CSV is stored; no image source, no
+            // backup (the old alt text is recorded per item at apply time) and
+            // no optimization.
+            $record->backup = 0;
+            $record->metaauthor = null;
+            $record->metalicense = null;
+            $record->optimizemaxpx = 0;
+            $DB->update_record('tool_imageextractor_job', $record);
+            if (isset($data->altcsvfile)) {
+                file_save_draft_area_files(
+                    (int) $data->altcsvfile,
+                    self::context()->id,
+                    self::COMPONENT,
+                    'altcsv',
+                    $jobid,
+                    ['subdirs' => 0, 'maxfiles' => 1]
+                );
+            }
             return;
         }
 
@@ -1004,6 +1026,7 @@ class manager {
         self::clear_outputs($jobid);
         $fs->delete_area_files($context->id, self::COMPONENT, 'csv', $jobid);
         $fs->delete_area_files($context->id, self::COMPONENT, 'replacement', $jobid);
+        $fs->delete_area_files($context->id, self::COMPONENT, 'altcsv', $jobid);
 
         if ($DB->record_exists('tool_imageextractor_item', ['jobid' => $jobid])) {
             $DB->set_field('tool_imageextractor_job', 'status', self::STATUS_CLEARING, ['id' => $jobid]);

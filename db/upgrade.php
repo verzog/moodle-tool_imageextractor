@@ -100,5 +100,17 @@ function xmldb_tool_imageextractor_upgrade($oldversion) {
         upgrade_plugin_savepoint(true, 2026071500, 'tool', 'imageextractor');
     }
 
+    if ($oldversion < 2026071501) {
+        // Per-item alt text (the image's description, read from the HTML that
+        // embeds it) for the export manifest and the alt-text audit.
+        $table = new xmldb_table('tool_imageextractor_item');
+        $field = new xmldb_field('alttext', XMLDB_TYPE_TEXT, null, null, null, null, null, 'imageheight');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026071501, 'tool', 'imageextractor');
+    }
+
     return true;
 }

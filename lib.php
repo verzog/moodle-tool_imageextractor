@@ -140,6 +140,47 @@ function tool_imageextractor_render_replace_preview(stdClass $job, moodle_url $v
 
     $review = \tool_imageextractor\manager::review_summary((int) $job->id);
 
+    // Alt-text: no thumbnails and no replacement resolution - preview the
+    // planned description against the current alt text of a sample of targets.
+    if ($job->replacemode === 'alttext') {
+        echo $OUTPUT->heading(get_string('altpreviewheading', 'tool_imageextractor'), 3);
+        echo html_writer::div(
+            get_string('reviewsummarytotalalt', 'tool_imageextractor', $review['total']),
+            'mb-2'
+        );
+        $replacer = new \tool_imageextractor\replacer($job);
+        if ($review['rows']) {
+            $atable = new html_table();
+            $atable->attributes['class'] = 'generaltable';
+            $atable->head = [
+                get_string('colfilename', 'tool_imageextractor'),
+                get_string('component', 'tool_imageextractor'),
+                get_string('colcurrentalt', 'tool_imageextractor'),
+                get_string('colnewalt', 'tool_imageextractor'),
+            ];
+            foreach ($review['rows'] as $prow) {
+                $current = [];
+                foreach (\tool_imageextractor\htmllocator::locate($prow) as $loc) {
+                    foreach (\tool_imageextractor\htmllocator::extract_alts($loc->html, $prow->filename) as $a) {
+                        $current[] = $a;
+                    }
+                }
+                $planned = $replacer->planned_alt($prow->filename);
+                $atable->data[] = [
+                    s($prow->filename),
+                    s($prow->component),
+                    $current ? s(implode(' | ', array_unique($current)))
+                        : html_writer::tag('em', get_string('altnonecell', 'tool_imageextractor')),
+                    $planned === null
+                        ? html_writer::tag('em', get_string('altnomappingcell', 'tool_imageextractor'))
+                        : s($planned),
+                ];
+            }
+            echo html_writer::table($atable);
+        }
+        return;
+    }
+
     // Metadata-only: no thumbnails and no replacement resolution - preview the
     // planned author/license change against a sample of the current values.
     if ($job->replacemode === 'metadata') {
