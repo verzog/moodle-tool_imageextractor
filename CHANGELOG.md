@@ -6,6 +6,19 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the project uses date-based Moodle build numbers (`$plugin->version`)
 alongside a human-readable `$plugin->release` string.
 
+## [0.18.1-beta] — 2026-07-15
+
+Build `2026071504`.
+
+### Added
+- **The job view page now shows the search criteria the job was defined with** —
+  a "Search criteria" table listing how files are selected (criteria or a CSV
+  mode), the course/category/activity scope resolved to names, the activity
+  name pattern, filename/MIME/size/date filters and the refinements set. Long
+  course or category lists are capped with a "+N more" tail, and only options
+  that were actually set are shown, so the job's definition is visible at a
+  glance without opening the edit form.
+
 ## [0.18.0-beta] — 2026-07-15
 
 Build `2026071503`.
