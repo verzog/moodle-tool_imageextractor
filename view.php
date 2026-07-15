@@ -346,6 +346,18 @@ if ((int) $job->failedcount > 0) {
 }
 echo html_writer::table($summary);
 
+// The search criteria this job was defined with (course/category/activity
+// scope resolved to names, plus every option set), so the definition is
+// visible without opening the edit form.
+$criteriarows = tool_imageextractor_criteria_rows($job);
+if ($criteriarows) {
+    echo $OUTPUT->heading(get_string('criteria', 'tool_imageextractor'), 3);
+    $ctable = new html_table();
+    $ctable->attributes['class'] = 'generaltable';
+    $ctable->data = $criteriarows;
+    echo html_writer::table($ctable);
+}
+
 if ($running) {
     // Clearing has its own hint; a job with no matched totals yet is still
     // analysing, and anything else is the generic processing hint.

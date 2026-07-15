@@ -332,3 +332,128 @@ function tool_imageextractor_thumbnail(?moodle_url $url, string $alt): string {
     ]);
     return html_writer::div($img, '', ['style' => 'width: 120px']);
 }
+
+/**
+ * Build a human-readable summary of the search criteria a job was defined with,
+ * for the job view page: how files are selected, the course/category/activity
+ * scope (resolved to names), and every option that was set. Only rows that
+ * carry a value are returned, so the table stays concise.
+ *
+ * @param stdClass $job The job record.
+ * @return array List of [label, value] string pairs.
+ */
+function tool_imageextractor_criteria_rows(stdClass $job): array {
+    $criteria = \tool_imageextractor\manager::decode_criteria($job);
+    $rows = [];
+
+    // How the files are selected (the criteria fields, or a CSV mode).
+    $mode = $job->csvmode !== '' ? $job->csvmode : 'none';
+    $rows[] = [
+        get_string('csvmode', 'tool_imageextractor'),
+        get_string('csvmode_' . $mode, 'tool_imageextractor'),
+    ];
+
+    // A match-list CSV nominates exact files and ignores the criteria fields.
+    if ($mode === 'match') {
+        if (!empty($criteria['filenames']) && is_array($criteria['filenames'])) {
+            $rows[] = [get_string('criteriamatchfiles', 'tool_imageextractor'), count($criteria['filenames'])];
+        }
+        if (!empty($criteria['contenthashes']) && is_array($criteria['contenthashes'])) {
+            $rows[] = [get_string('criteriamatchhashes', 'tool_imageextractor'), count($criteria['contenthashes'])];
+        }
+    } else {
+        $rows[] = [
+            get_string('imageonly', 'tool_imageextractor'),
+            empty($criteria['imageonly']) ? get_string('no') : get_string('yes'),
+        ];
+
+        $courses = tool_imageextractor_name_list('course', 'shortname', $criteria['courseids'] ?? []);
+        if ($courses !== '') {
+            $rows[] = [get_string('courses', 'tool_imageextractor'), $courses];
+        }
+        $categories = tool_imageextractor_name_list('course_categories', 'name', $criteria['categoryids'] ?? []);
+        if ($categories !== '') {
+            $rows[] = [get_string('categories', 'tool_imageextractor'), $categories];
+        }
+
+        if (!empty($criteria['modname'])) {
+            $modname = (string) $criteria['modname'];
+            $label = get_string_manager()->string_exists('modulename', 'mod_' . $modname)
+                ? get_string('modulename', 'mod_' . $modname) : $modname;
+            $rows[] = [get_string('modtype', 'tool_imageextractor'), $label];
+        }
+        if (!empty($criteria['modinstancepattern'])) {
+            $rows[] = [get_string('modinstancepattern', 'tool_imageextractor'), s($criteria['modinstancepattern'])];
+        }
+        if (!empty($criteria['component'])) {
+            $rows[] = [get_string('component', 'tool_imageextractor'), s($criteria['component'])];
+        }
+        if (!empty($criteria['filearea'])) {
+            $rows[] = [get_string('filearea', 'tool_imageextractor'), s($criteria['filearea'])];
+        }
+        if (!empty($criteria['filenamepattern'])) {
+            $rows[] = [get_string('filenamepattern', 'tool_imageextractor'), s($criteria['filenamepattern'])];
+        }
+        if (!empty($criteria['mimetypes']) && is_array($criteria['mimetypes'])) {
+            $rows[] = [get_string('mimetypes', 'tool_imageextractor'), s(implode(', ', $criteria['mimetypes']))];
+        }
+        if (!empty($criteria['minsize'])) {
+            $rows[] = [get_string('minsizekb', 'tool_imageextractor'), display_size((int) $criteria['minsize'])];
+        }
+        if (!empty($criteria['maxsize'])) {
+            $rows[] = [get_string('maxsizekb', 'tool_imageextractor'), display_size((int) $criteria['maxsize'])];
+        }
+        if (!empty($criteria['datefrom'])) {
+            $rows[] = [get_string('datefrom', 'tool_imageextractor'), userdate((int) $criteria['datefrom'])];
+        }
+        if (!empty($criteria['dateto'])) {
+            $rows[] = [get_string('dateto', 'tool_imageextractor'), userdate((int) $criteria['dateto'])];
+        }
+        if (!empty($criteria['rows']) && is_array($criteria['rows'])) {
+            $rows[] = [get_string('criteriarows', 'tool_imageextractor'), count($criteria['rows'])];
+        }
+    }
+
+    // Refinements apply whichever way files are selected.
+    if (!empty($job->missingonly)) {
+        $rows[] = [get_string('missingonly', 'tool_imageextractor'), get_string('yes')];
+    }
+    if (!empty($job->altmissing)) {
+        $rows[] = [get_string('altmissing', 'tool_imageextractor'), get_string('yes')];
+    }
+
+    return $rows;
+}
+
+/**
+ * Resolve a list of record ids to a comma-separated list of names, capped so a
+ * huge scope does not overflow the page (with a "+N more" tail). Ids with no
+ * matching record are shown as "#id".
+ *
+ * @param string $table The table to read (e.g. 'course').
+ * @param string $namefield The column holding the display name.
+ * @param mixed $ids An array of ids (anything else yields '').
+ * @param int $cap Maximum names to list before summarising the remainder.
+ * @return string
+ */
+function tool_imageextractor_name_list(string $table, string $namefield, $ids, int $cap = 10): string {
+    global $DB;
+    if (empty($ids) || !is_array($ids)) {
+        return '';
+    }
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($id) => $id > 0)));
+    if (!$ids) {
+        return '';
+    }
+    $records = $DB->get_records_list($table, 'id', $ids, '', 'id, ' . $namefield);
+    $names = [];
+    foreach ($ids as $id) {
+        $names[] = isset($records[$id]) ? format_string($records[$id]->{$namefield}) : '#' . $id;
+    }
+    $shown = array_slice($names, 0, $cap);
+    $summary = s(implode(', ', $shown));
+    if (count($names) > $cap) {
+        $summary .= ' ' . get_string('criteriaandmore', 'tool_imageextractor', count($names) - $cap);
+    }
+    return $summary;
+}
