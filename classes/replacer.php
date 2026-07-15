@@ -98,7 +98,6 @@ class replacer {
         // Unordered: sorting the whole matched set is a heavy database
         // operation and the preview does not care about row order.
         $rs = $matcher->get_recordset(false);
-        $missingonly = !empty($this->job->missingonly);
 
         $scanned = 0;
         $willreplace = 0;
@@ -110,14 +109,10 @@ class replacer {
                 $truncated = true;
                 break;
             }
-            // Only "missing only" jobs need the stored_file (to inspect the
-            // content); fetching it is one extra query per row, and the
-            // matcher's WHERE already excludes directories and empty rows.
-            if ($missingonly) {
-                $stored = $this->fs->get_file_by_id((int) $file->id);
-                if (!$stored || !self::content_missing($stored)) {
-                    continue;
-                }
+            // Apply the post-match refinements (missing content / missing alt);
+            // each only queries when its refinement is switched on.
+            if (!$this->passes_refinements($file)) {
+                continue;
             }
             $scanned++;
             $replacement = $this->resolve_replacement($file->filename);
@@ -146,6 +141,37 @@ class replacer {
             'truncated'   => $truncated,
             'rows'        => $rows,
         ];
+    }
+
+    /**
+     * Whether a matched file passes the job's post-match refinements, which the
+     * matcher's SQL cannot express: "missing only" (content gone/unreadable)
+     * and "missing alt" (embedded in content with an empty/missing description).
+     * A job with neither refinement passes every file without any extra query.
+     *
+     * @param \stdClass $file A matched {files} row from the matcher.
+     * @return bool
+     */
+    protected function passes_refinements(\stdClass $file): bool {
+        if (!empty($this->job->missingonly)) {
+            $stored = $this->fs->get_file_by_id((int) $file->id);
+            if (!$stored || !self::content_missing($stored)) {
+                return false;
+            }
+        }
+        if (!empty($this->job->altmissing)) {
+            $ref = (object) [
+                'component'  => $file->component,
+                'filearea'   => $file->filearea,
+                'contextid'  => (int) $file->contextid,
+                'fileitemid' => (int) $file->itemid,
+                'filename'   => $file->filename,
+            ];
+            if (!htmllocator::is_undescribed($ref)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -203,8 +229,6 @@ class replacer {
             );
         }
 
-        $missingonly = !empty($this->job->missingonly);
-
         $matched = 0;
         $bytes = 0;
         $batch = [];
@@ -213,14 +237,11 @@ class replacer {
         foreach ($rows as $file) {
             $lastid = (int) $file->id;
 
-            // In "missing only" mode we keep just the broken files. Only that
-            // mode needs the stored_file hydrated (one extra query per row);
+            // Keep only files passing the post-match refinements (missing
+            // content / missing alt); each queries only when switched on, and
             // the matcher's WHERE already excludes directories and empty rows.
-            if ($missingonly) {
-                $stored = $this->fs->get_file_by_id((int) $file->id);
-                if (!$stored || !self::content_missing($stored)) {
-                    continue;
-                }
+            if (!$this->passes_refinements($file)) {
+                continue;
             }
 
             // The match is type-agnostic: it records the file as a pending item
@@ -491,6 +512,16 @@ class replacer {
                     }
                     [$newhtml, $n] = htmllocator::set_alt($location->html, $item->filename, $newalt);
                     if ($n > 0 && $newhtml !== $location->html) {
+                        // Back up the field's original HTML (once per job) so
+                        // the whole change can be reverted with Restore.
+                        if (!empty($this->job->backup)) {
+                            $this->backup_html_field(
+                                $location->table,
+                                $location->column,
+                                $location->id,
+                                $location->html
+                            );
+                        }
                         $DB->set_field($location->table, $location->column, $newhtml, ['id' => $location->id]);
                         $changed += $n;
                     }
@@ -555,6 +586,86 @@ class replacer {
     public function planned_alt(string $filename): ?string {
         $map = $this->alt_map();
         return array_key_exists($filename, $map) ? $map[$filename] : null;
+    }
+
+    /**
+     * Store a content field's original HTML once per job, so an alt-text
+     * replace can be reverted field-for-field. A later item that changes the
+     * same field finds the backup already present (unique per job+field) and
+     * leaves the original untouched.
+     *
+     * @param string $table
+     * @param string $column
+     * @param int $rowid
+     * @param string $original The field's HTML before this job changed it.
+     * @return void
+     */
+    protected function backup_html_field(string $table, string $column, int $rowid, string $original): void {
+        global $DB;
+        $key = [
+            'jobid'      => (int) $this->job->id,
+            'tablename'  => $table,
+            'columnname' => $column,
+            'rowid'      => $rowid,
+        ];
+        if ($DB->record_exists('tool_imageextractor_htmlbackup', $key)) {
+            return;
+        }
+        $record = (object) $key;
+        $record->oldcontent = $original;
+        $record->timecreated = time();
+        try {
+            $DB->insert_record('tool_imageextractor_htmlbackup', $record);
+        } catch (\dml_exception $e) {
+            // A concurrent batch backed up the same field first; the unique
+            // (jobid, table, column, row) index rejected this duplicate, which
+            // is exactly the intended outcome.
+            unset($e);
+        }
+    }
+
+    /**
+     * Revert an alt-text replace: write each changed field's backed-up original
+     * HTML back, a bounded batch per run, then flip the job's items to restored
+     * once every field is back.
+     *
+     * @param int $limit
+     * @return int Number of field backups still to restore.
+     */
+    protected function restore_alt_batch(int $limit): int {
+        global $DB;
+
+        $backups = $DB->get_records(
+            'tool_imageextractor_htmlbackup',
+            ['jobid' => $this->job->id],
+            'id ASC',
+            '*',
+            0,
+            $limit
+        );
+        foreach ($backups as $backup) {
+            try {
+                $DB->set_field($backup->tablename, $backup->columnname, $backup->oldcontent, ['id' => $backup->rowid]);
+            } catch (\Throwable $e) {
+                mtrace('tool_imageextractor: alt-text restore failed for ' .
+                    $backup->tablename . '.' . $backup->columnname . ' #' . $backup->rowid . ': ' . $e->getMessage());
+            }
+            $DB->delete_records('tool_imageextractor_htmlbackup', ['id' => $backup->id]);
+        }
+
+        $remaining = $DB->count_records('tool_imageextractor_htmlbackup', ['jobid' => $this->job->id]);
+        if ($remaining === 0) {
+            // Every field is back to its original; mark the changed items
+            // restored so the job reads as reverted.
+            $DB->set_field_select(
+                'tool_imageextractor_item',
+                'status',
+                'restored',
+                'jobid = :jobid AND status = :done',
+                ['jobid' => $this->job->id, 'done' => 'done']
+            );
+        }
+        return $remaining;
     }
 
     /**
@@ -777,6 +888,12 @@ class replacer {
      */
     public function restore_batch(int $limit): int {
         global $DB;
+
+        // Alt-text replaces are reverted from the per-field HTML backups, not
+        // from per-file content backups.
+        if ($this->job->replacemode === 'alttext') {
+            return $this->restore_alt_batch($limit);
+        }
 
         $items = $DB->get_records(
             'tool_imageextractor_item',

@@ -154,6 +154,12 @@ class process_job extends \core\task\adhoc_task {
             }
             $lasthash = $file->contenthash;
 
+            // "Missing alt" audit refinement (the matcher's SQL cannot express
+            // it): keep only images shown in content without a description.
+            if (!empty($job->altmissing) && !$this->passes_alt_refinement($file)) {
+                continue;
+            }
+
             $courseinfo = $this->resolve_course((int) $file->contextid);
             $outputname = naming::render($job->namingrule, [
                 'originalname'    => $file->filename,
@@ -572,6 +578,24 @@ class process_job extends \core\task\adhoc_task {
             'mimetype'        => $item->mimetype,
             'seq'             => $seq,
             'date'            => userdate((int) $item->filetimecreated, '%Y%m%d'),
+        ]);
+    }
+
+    /**
+     * Whether a matched file is an image displayed in content without a
+     * description (an empty/missing alt), for the "missing alt" refinement on
+     * the direct-extract path.
+     *
+     * @param \stdClass $file A matched {files} row from the matcher.
+     * @return bool
+     */
+    protected function passes_alt_refinement(\stdClass $file): bool {
+        return \tool_imageextractor\htmllocator::is_undescribed((object) [
+            'component'  => $file->component,
+            'filearea'   => $file->filearea,
+            'contextid'  => (int) $file->contextid,
+            'fileitemid' => (int) $file->itemid,
+            'filename'   => $file->filename,
         ]);
     }
 

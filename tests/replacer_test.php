@@ -392,35 +392,47 @@ final class replacer_test extends \advanced_testcase {
     }
 
     /**
-     * Alt-text mode rewrites the description in the HTML that embeds the image,
-     * from the uploaded CSV, without touching the file content.
+     * Create a Page whose content embeds the given image files, storing a
+     * stub file for every @@PLUGINFILE@@ reference in the content.
+     *
+     * @param string $content The page's HTML (with @@PLUGINFILE@@/name refs).
+     * @return array [\stdClass $page, \context_module $modcontext]
      */
-    public function test_alttext_apply_updates_embedding_html(): void {
-        global $DB;
-        $this->resetAfterTest();
-
+    protected function make_page_with_images(string $content): array {
         $course = $this->getDataGenerator()->create_course();
         $page = $this->getDataGenerator()->create_module('page', [
             'course'        => $course->id,
-            'content'       => '<p><img src="@@PLUGINFILE@@/pic.png" alt="before"></p>',
+            'content'       => $content,
             'contentformat' => FORMAT_HTML,
         ]);
         $modcontext = \context_module::instance($page->cmid);
-        get_file_storage()->create_file_from_string([
-            'contextid' => $modcontext->id,
-            'component' => 'mod_page',
-            'filearea'  => 'content',
-            'itemid'    => 0,
-            'filepath'  => '/',
-            'filename'  => 'pic.png',
-        ], 'PNGDATA');
+        preg_match_all('#@@PLUGINFILE@@/([^"\'\s>]+)#', $content, $matches);
+        foreach (array_unique($matches[1]) as $filename) {
+            get_file_storage()->create_file_from_string([
+                'contextid' => $modcontext->id,
+                'component' => 'mod_page',
+                'filearea'  => 'content',
+                'itemid'    => 0,
+                'filepath'  => '/',
+                'filename'  => rawurldecode($filename),
+            ], 'PNGDATA');
+        }
+        return [$page, $modcontext];
+    }
 
-        // A replace job scoped to the page content, in alt-text mode, with a
-        // descriptions CSV mapping the file name to its new alt text.
+    /**
+     * Create an alt-text replace job scoped to Page content, with the given
+     * descriptions CSV body and backup flag.
+     *
+     * @param string $csvbody The alt.csv contents.
+     * @param int $backup Whether to keep an HTML backup for Restore.
+     * @return \stdClass The job record.
+     */
+    protected function make_alt_job(string $csvbody, int $backup): \stdClass {
         $job = $this->make_replace_job_record([
             'criteria'    => json_encode(['imageonly' => true, 'component' => 'mod_page', 'filearea' => 'content']),
             'replacemode' => 'alttext',
-            'backup'      => 0,
+            'backup'      => $backup,
         ], 'unused');
         get_file_storage()->create_file_from_string([
             'contextid' => \context_system::instance()->id,
@@ -429,7 +441,20 @@ final class replacer_test extends \advanced_testcase {
             'itemid'    => $job->id,
             'filepath'  => '/',
             'filename'  => 'alt.csv',
-        ], "filename,alttext\npic.png,\"A helpful diagram\"\n");
+        ], $csvbody);
+        return $job;
+    }
+
+    /**
+     * Alt-text mode rewrites the description in the HTML that embeds the image,
+     * from the uploaded CSV, without touching the file content.
+     */
+    public function test_alttext_apply_updates_embedding_html(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        [$page, $modcontext] = $this->make_page_with_images('<p><img src="@@PLUGINFILE@@/pic.png" alt="before"></p>');
+        $job = $this->make_alt_job("filename,alttext\npic.png,\"A helpful diagram\"\n", 0);
 
         $replacer = new replacer($job);
         $replacer->prepare();
@@ -446,6 +471,62 @@ final class replacer_test extends \advanced_testcase {
         $this->assertStringNotContainsString('alt="before"', $content);
         $stored = get_file_storage()->get_file($modcontext->id, 'mod_page', 'content', 0, '/', 'pic.png');
         $this->assertSame('PNGDATA', $stored->get_content());
+    }
+
+    /**
+     * With backup on, an alt-text replace is reversible: Restore writes the
+     * original HTML back, drops the field backups, and marks items restored.
+     */
+    public function test_alttext_restore_reverts_html(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        [$page] = $this->make_page_with_images('<p><img src="@@PLUGINFILE@@/pic.png" alt="before"></p>');
+        $job = $this->make_alt_job("filename,alttext\npic.png,\"after\"\n", 1);
+
+        $replacer = new replacer($job);
+        $replacer->prepare();
+        $this->assertSame(0, $replacer->apply_batch(10));
+
+        // Applied, backed up, and reported as restorable.
+        $this->assertStringContainsString('alt="after"', $DB->get_field('page', 'content', ['id' => $page->id]));
+        $this->assertSame(1, $DB->count_records('tool_imageextractor_htmlbackup', ['jobid' => $job->id]));
+        $this->assertTrue(manager::has_restorable($job->id));
+
+        // Restore puts the original description back and clears the backups.
+        $this->assertSame(0, $replacer->restore_batch(10));
+        $content = $DB->get_field('page', 'content', ['id' => $page->id]);
+        $this->assertStringContainsString('alt="before"', $content);
+        $this->assertStringNotContainsString('alt="after"', $content);
+        $this->assertSame(0, $DB->count_records('tool_imageextractor_htmlbackup', ['jobid' => $job->id]));
+        $this->assertSame('restored', $DB->get_field('tool_imageextractor_item', 'status', ['jobid' => $job->id]));
+        $this->assertFalse(manager::has_restorable($job->id));
+    }
+
+    /**
+     * The "missing alt" refinement keeps only images embedded in content
+     * through an <img> with an empty/missing alt.
+     */
+    public function test_altmissing_refinement(): void {
+        global $DB;
+        $this->resetAfterTest();
+
+        $this->make_page_with_images(
+            '<p><img src="@@PLUGINFILE@@/described.png" alt="a car">'
+            . '<img src="@@PLUGINFILE@@/bare.png"></p>'
+        );
+        $job = $this->make_replace_job_record([
+            'criteria'   => json_encode(['imageonly' => true, 'component' => 'mod_page', 'filearea' => 'content']),
+            'altmissing' => 1,
+        ], 'unused');
+
+        $replacer = new replacer($job);
+        $replacer->prepare();
+
+        // Only the undescribed image is matched.
+        $items = $DB->get_records('tool_imageextractor_item', ['jobid' => $job->id]);
+        $this->assertCount(1, $items);
+        $this->assertSame('bare.png', reset($items)->filename);
     }
 
     /**

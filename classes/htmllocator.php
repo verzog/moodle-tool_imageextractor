@@ -61,6 +61,32 @@ class htmllocator {
     }
 
     /**
+     * Whether an image is embedded in mapped content via at least one <img>
+     * tag whose alt attribute is empty or missing - i.e. it is displayed to
+     * users without a description. An image that is not embedded in any mapped
+     * field, or is embedded only with non-empty descriptions, is not flagged.
+     *
+     * @param \stdClass $item An object exposing component, filearea, contextid,
+     *                        fileitemid and filename (a matched item, or a
+     *                        matcher file row normalised to those names).
+     * @return bool
+     */
+    public static function is_undescribed(\stdClass $item): bool {
+        $filename = (string) $item->filename;
+        foreach (self::locate($item) as $location) {
+            // extract_alts returns the alt value of every <img> that references
+            // this file (an empty string when the tag has no alt); a blank one
+            // means the image is shown without a description.
+            foreach (self::extract_alts($location->html, $filename) as $alt) {
+                if (trim($alt) === '') {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * Resolve which table/column/row holds the HTML that embeds this file, or
      * null when the file's area is not a mapped rich-text field.
      *

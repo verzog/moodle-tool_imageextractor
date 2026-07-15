@@ -75,6 +75,7 @@ if ($job) {
         'csvmode'     => $job->csvmode,
         'csvfile'     => $draftcsv,
         'missingonly' => $job->missingonly ? 1 : 0,
+        'altmissing'  => $job->altmissing ? 1 : 0,
     ]);
     $mform->set_data($defaults);
 }

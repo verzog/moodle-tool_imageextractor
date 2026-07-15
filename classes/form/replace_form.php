@@ -164,8 +164,9 @@ class replace_form extends \moodleform {
             get_string('backup_help', 'tool_imageextractor')
         );
         $mform->setDefault('backup', 1);
+        // Backup applies to content and alt-text replaces (so both can be
+        // undone); metadata-only changes are not backed up.
         $mform->hideIf('backup', 'replacemode', 'eq', 'metadata');
-        $mform->hideIf('backup', 'replacemode', 'eq', 'alttext');
 
         $mform->addElement('submit', 'replacesubmit', get_string('replacecontinue', 'tool_imageextractor'));
     }

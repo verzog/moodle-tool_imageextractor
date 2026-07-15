@@ -322,6 +322,9 @@ if ($isreplace) {
 }
 $summary->data[] = [get_string('missingonly', 'tool_imageextractor'),
     $job->missingonly ? get_string('yes') : get_string('no')];
+if ($job->altmissing) {
+    $summary->data[] = [get_string('altmissing', 'tool_imageextractor'), get_string('yes')];
+}
 if ($job->jobtype === 'extract') {
     $summary->data[] = [get_string('namingrule', 'tool_imageextractor'), s($job->namingrule)];
     $summary->data[] = [get_string('volumemb', 'tool_imageextractor'),
